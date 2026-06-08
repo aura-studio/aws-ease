@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/aura-studio/aws-ease/transport/httptrans"
 )
 
 func TestClientCallRewritesLambdaToHTTP(t *testing.T) {
@@ -49,10 +51,24 @@ func TestClientCallRewritesLambdaToHTTP(t *testing.T) {
 func TestClientConvenienceMethods(t *testing.T) {
 	t.Parallel()
 
-	client := New()
-	if _, err := client.Invoke(context.Background(), "lambda://svc/do", []byte("body")); err == nil {
-		// default lambda transport requires aws config at runtime; just ensure the wrapper exists
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("expected GET method, got %s", r.Method)
+		}
+		if r.Header.Get("X-Test") != "ok" {
+			t.Fatalf("expected propagated header, got %q", r.Header.Get("X-Test"))
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("get-ok"))
+	}))
+	defer server.Close()
+
+	client := New(WithHTTPTransportOptions(httptrans.WithHeader("X-Test", "ok")))
+	resp, err := client.Get(context.Background(), server.URL+"/health")
+	if err != nil {
+		t.Fatalf("Get returned error: %v", err)
 	}
-	if _, err := client.Send(context.Background(), "sqs://queue", []byte("body")); err == nil {
+	if resp.StatusCode != http.StatusOK || string(resp.Body) != "get-ok" {
+		t.Fatalf("unexpected get response: %#v", resp)
 	}
 }

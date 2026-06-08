@@ -15,6 +15,7 @@ import (
 type Client struct {
 	dispatcher *Dispatcher
 	resolver   *resolver.Resolver
+	httpOpts   []httptrans.Option
 }
 
 type ClientOption func(*clientOptions)
@@ -53,7 +54,7 @@ func New(opts ...ClientOption) *Client {
 	dispatcher.Register("lambda", lambdatrans.New(options.lambdaOpts...))
 	dispatcher.Register("sqs", sqstrans.New(options.sqsOpts...))
 
-	return &Client{dispatcher: dispatcher, resolver: res}
+	return &Client{dispatcher: dispatcher, resolver: res, httpOpts: append([]httptrans.Option(nil), options.httpOpts...)}
 }
 
 // WithRewrite 增加一条地址重写规则。
@@ -110,6 +111,8 @@ func (c *Client) Get(ctx context.Context, target string) (*transportcore.Respons
 	if err != nil {
 		return nil, err
 	}
-	transport := httptrans.New(httptrans.WithMethod(http.MethodGet))
+	transportOpts := append([]httptrans.Option(nil), c.httpOpts...)
+	transportOpts = append(transportOpts, httptrans.WithMethod(http.MethodGet))
+	transport := httptrans.New(transportOpts...)
 	return transport.Invoke(ctx, endpoint, nil)
 }
