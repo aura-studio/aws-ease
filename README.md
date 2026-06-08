@@ -7,8 +7,8 @@
 go get github.com/aura-studio/aws-ease
 ```
 
-> 🚧 本仓库处于脚手架阶段。整体设计思路与开发任务清单见 [doc/TODO.md](doc/TODO.md)。
-> 各功能模块会按任务逐个实现，本 README 会随之补全用法示例。
+> 当前已实现 resolver、dispatcher、HTTP / Lambda / SQS transport、本地 mock 服务与统一 Client。
+> 设计思路与开发任务清单仍保留在 [doc/TODO.md](doc/TODO.md) 便于追溯。
 
 ## 解决什么问题
 
@@ -29,7 +29,7 @@ aws-ease 把「调什么」和「怎么调」解耦：
   用普通 HTTP 服务即可模拟 Lambda。
 - 生产环境：不改业务代码，`lambda://order-service` 直连真实 Lambda 函数。
 
-## 地址约定（草案）
+## 地址约定
 
 | 形式                                   | 路由到      | 说明                                  |
 | -------------------------------------- | ----------- | ------------------------------------- |
@@ -41,12 +41,44 @@ aws-ease 把「调什么」和「怎么调」解耦：
 
 | 模块                | 状态 |
 | ------------------- | ---- |
-| 地址解析 resolver   | TODO |
-| 传输路由 dispatcher | TODO |
-| HTTP transport      | TODO |
-| Lambda transport    | TODO |
-| SQS transport       | TODO |
-| 本地 mock 服务      | TODO |
+| 地址解析 resolver   | ✅   |
+| 传输路由 dispatcher | ✅   |
+| HTTP transport      | ✅   |
+| Lambda transport    | ✅   |
+| SQS transport       | ✅   |
+| 本地 mock 服务      | ✅   |
+
+## 快速示例
+
+```go
+client := awsease.New(
+    awsease.WithRewrite("lambda://*", "http://localhost:8080/lambda/{host}{path}"),
+)
+
+resp, err := client.Call(context.Background(), "lambda://order-service/create", []byte(`{"id":1}`))
+if err != nil {
+    panic(err)
+}
+
+fmt.Println(resp.StatusCode, string(resp.Body))
+```
+
+## 本地联调
+
+启动 mock server：
+
+```bash
+go run ./cmd/aws-ease-mock
+```
+
+然后把逻辑地址重写到本地：
+
+```go
+client := awsease.New(
+    awsease.WithRewrite("lambda://*", "http://localhost:8080/lambda/{host}{path}"),
+    awsease.WithRewrite("sqs://*", "http://localhost:8080/sqs/{host}"),
+)
+```
 
 完整任务拆解见 [doc/TODO.md](doc/TODO.md)。
 
