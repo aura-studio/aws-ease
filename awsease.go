@@ -13,4 +13,4 @@
 package awsease
 
 // Version 是当前模块的语义化版本号。
-const Version = "0.0.0"
+const Version = "0.1.0"
