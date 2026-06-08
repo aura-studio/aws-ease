@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/aura-studio/aws-ease"
+	"github.com/aura-studio/aws-ease/resolver"
+	"github.com/aura-studio/aws-ease/transportcore"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	awslambda "github.com/aws/aws-sdk-go-v2/service/lambda"
@@ -76,7 +77,7 @@ func WithBaseEndpoint(endpoint string) Option {
 }
 
 // Invoke 将 Endpoint 编码为 Lambda 请求并执行调用。
-func (t *Transport) Invoke(ctx context.Context, endpoint awsease.Endpoint, payload []byte) (*awsease.Response, error) {
+func (t *Transport) Invoke(ctx context.Context, endpoint resolver.Endpoint, payload []byte) (*transportcore.Response, error) {
 	invoker, err := t.ensureInvoker(ctx)
 	if err != nil {
 		return nil, err
@@ -106,7 +107,7 @@ func (t *Transport) Invoke(ctx context.Context, endpoint awsease.Endpoint, paylo
 		return nil, fmt.Errorf("invoke lambda %q: %w", endpoint.Host, err)
 	}
 
-	response := &awsease.Response{StatusCode: 200, Body: output.Payload, Headers: map[string]string{}}
+	response := &transportcore.Response{StatusCode: 200, Body: output.Payload, Headers: map[string]string{}}
 	if output.FunctionError != nil {
 		response.StatusCode = 500
 		response.Headers["Function-Error"] = *output.FunctionError

@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/aura-studio/aws-ease"
+	"github.com/aura-studio/aws-ease/resolver"
+	"github.com/aura-studio/aws-ease/transportcore"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	awssqs "github.com/aws/aws-sdk-go-v2/service/sqs"
@@ -79,7 +80,7 @@ func WithBaseEndpoint(endpoint string) Option {
 }
 
 // Invoke 将 Endpoint 转为 SQS SendMessage 请求。
-func (t *Transport) Invoke(ctx context.Context, endpoint awsease.Endpoint, payload []byte) (*awsease.Response, error) {
+func (t *Transport) Invoke(ctx context.Context, endpoint resolver.Endpoint, payload []byte) (*transportcore.Response, error) {
 	client, err := t.ensureClient(ctx)
 	if err != nil {
 		return nil, err
@@ -115,7 +116,7 @@ func (t *Transport) Invoke(ctx context.Context, endpoint awsease.Endpoint, paylo
 		headers["Message-ID"] = *output.MessageId
 	}
 
-	return &awsease.Response{StatusCode: 202, Headers: headers}, nil
+	return &transportcore.Response{StatusCode: 202, Headers: headers}, nil
 }
 
 func (t *Transport) ensureClient(ctx context.Context) (SQSClient, error) {

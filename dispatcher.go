@@ -6,11 +6,12 @@ import (
 	"strings"
 
 	"github.com/aura-studio/aws-ease/resolver"
+	"github.com/aura-studio/aws-ease/transportcore"
 )
 
 // Dispatcher 根据 scheme 将调用路由到对应传输实现。
 type Dispatcher struct {
-	transports map[string]Transport
+	transports map[string]transportcore.Transport
 	resolver   targetResolver
 }
 
@@ -24,7 +25,7 @@ type DispatcherOption func(*Dispatcher)
 // NewDispatcher 创建新的分发器。
 func NewDispatcher(opts ...DispatcherOption) *Dispatcher {
 	d := &Dispatcher{
-		transports: map[string]Transport{},
+		transports: map[string]transportcore.Transport{},
 		resolver:   resolver.New(),
 	}
 	for _, opt := range opts {
@@ -45,15 +46,15 @@ func WithResolver(res targetResolver) DispatcherOption {
 }
 
 // Register 注册 scheme 对应的传输实现。
-func (d *Dispatcher) Register(scheme string, transport Transport) {
+func (d *Dispatcher) Register(scheme string, transport transportcore.Transport) {
 	if d.transports == nil {
-		d.transports = map[string]Transport{}
+		d.transports = map[string]transportcore.Transport{}
 	}
 	d.transports[strings.ToLower(scheme)] = transport
 }
 
 // Call 解析 target 并分发到对应的 Transport。
-func (d *Dispatcher) Call(ctx context.Context, target string, payload []byte) (*Response, error) {
+func (d *Dispatcher) Call(ctx context.Context, target string, payload []byte) (*transportcore.Response, error) {
 	endpoint, err := d.resolver.Parse(target)
 	if err != nil {
 		return nil, err

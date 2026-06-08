@@ -8,10 +8,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/aura-studio/aws-ease"
+	"github.com/aura-studio/aws-ease/resolver"
+	"github.com/aura-studio/aws-ease/transportcore"
 )
 
-type option func(*Transport)
+type Option func(*Transport)
 
 // Transport 通过 HTTP 执行统一调用。
 type Transport struct {
@@ -21,7 +22,7 @@ type Transport struct {
 }
 
 // New 创建 HTTP transport。
-func New(opts ...option) *Transport {
+func New(opts ...Option) *Transport {
 	t := &Transport{
 		client: &http.Client{Timeout: 30 * time.Second},
 		method: http.MethodPost,
@@ -36,7 +37,7 @@ func New(opts ...option) *Transport {
 }
 
 // WithMethod 配置请求方法。
-func WithMethod(method string) option {
+func WithMethod(method string) Option {
 	return func(t *Transport) {
 		if method != "" {
 			t.method = method
@@ -45,7 +46,7 @@ func WithMethod(method string) option {
 }
 
 // WithHeader 配置默认请求头。
-func WithHeader(key, value string) option {
+func WithHeader(key, value string) Option {
 	return func(t *Transport) {
 		if key == "" {
 			return
@@ -55,7 +56,7 @@ func WithHeader(key, value string) option {
 }
 
 // WithTimeout 配置 HTTP 客户端超时。
-func WithTimeout(timeout time.Duration) option {
+func WithTimeout(timeout time.Duration) Option {
 	return func(t *Transport) {
 		if timeout > 0 {
 			t.client.Timeout = timeout
@@ -64,7 +65,7 @@ func WithTimeout(timeout time.Duration) option {
 }
 
 // Invoke 执行 HTTP 请求。
-func (t *Transport) Invoke(ctx context.Context, endpoint awsease.Endpoint, payload []byte) (*awsease.Response, error) {
+func (t *Transport) Invoke(ctx context.Context, endpoint resolver.Endpoint, payload []byte) (*transportcore.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, t.method, endpoint.Raw, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -91,7 +92,7 @@ func (t *Transport) Invoke(ctx context.Context, endpoint awsease.Endpoint, paylo
 		}
 	}
 
-	return &awsease.Response{
+	return &transportcore.Response{
 		StatusCode: resp.StatusCode,
 		Body:       body,
 		Headers:    headers,

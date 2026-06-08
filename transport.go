@@ -1,15 +1,9 @@
 package awsease
 
-import "context"
+import "github.com/aura-studio/aws-ease/transportcore"
 
 // Response 表示统一传输后的响应。
-type Response struct {
-	StatusCode int
-	Body       []byte
-	Headers    map[string]string
-}
+type Response = transportcore.Response
 
 // Transport 抽象具体后端调用方式。
-type Transport interface {
-	Invoke(ctx context.Context, endpoint Endpoint, payload []byte) (*Response, error)
-}
+type Transport = transportcore.Transport
