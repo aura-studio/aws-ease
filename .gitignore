@@ -1,0 +1,17 @@
+# 构建产物
+bin/
+*.exe
+*.out
+*.test
+
+# 本地开发与 SAM
+.aws-sam
+.env
+.env_vars.json
+
+# 编辑器 / 工具
+.kiro
+kiro.md
+.idea/
+.vscode/
+.DS_Store
