@@ -534,7 +534,7 @@ c.Do(ctx, "lambda://order-create", body) // 实际打到 http://localhost:8080/l
 - 验收：fake `LambdaAPI` 断言 `InvokeInput.Payload == Request.Body`（逐字节，证明无信封）；
   函数错误场景 `err==nil && FuncError!="" && Status==0 && OK()==false`；异步场景 `Async==true && Body==nil && OK()==true`。
 
-### T06 — doSQS（独立 Attributes + GroupID+DedupID + UTF-8 校验 + 缓存解析）
+### ✅ ~~T06 — doSQS（独立 Attributes + GroupID+DedupID + UTF-8 校验 + 缓存解析）~~（已完成）
 - 目标：SQS 后端执行。
 - 交付物：`doSQS`：addr 为 URL 直用 / 为名走 `GetQueueUrl` 带锁缓存、`Body` UTF-8 校验、
   `Attributes` -> String `MessageAttributes`、`GroupID`/`DedupID`、填 `MessageID/Backend/Requested`（`Status==0`、`Body==nil`）。
