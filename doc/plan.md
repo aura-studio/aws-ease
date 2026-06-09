@@ -381,8 +381,10 @@ target.go         // parseTarget、本地重定向改写、哨兵错误（ErrBad
 request.go        // Request 结构 + Method 默认推导
 response.go       // Response 结构、OK()、JSON()、String()
 do.go             // Do / DoRequest 主入口 + 内部 doHTTP/doLambda/doSQS（同包非导出，switch backend 分发）
-client_test.go / target_test.go / do_test.go / example_test.go
+*_test.go         // client/target/request/response/do_http/do_lambda/do_sqs/do/fakes 单测
+integration_test.go        // 真实 AWS opt-in 集成测试（//go:build integration）
 cmd/aws-ease-mock/main.go  // 本地 HTTP mock（去掉旧信封字段，裸 echo）
+examples/         // 每个 case 一个可运行 main：localdev / http / lambda / sqs
 doc/plan.md       // 本文
 ```
 
@@ -556,8 +558,8 @@ c.Do(ctx, "lambda://order-create", body) // 实际打到 http://localhost:8080/l
 
 ### ✅ ~~T09 — 示例、文档、CI~~（已完成）
 - 目标：可发布质量。
-- 交付物：`example_test.go`（第 8 章示例，`go test` 可跑）；`awsease.go` package doc 完善；README/godoc 对齐本规格；
-  `doc/TODO.md` 标记为被本 `plan.md` 取代。
+- 交付物：`examples/`（每个 case 一个可运行 main：localdev / http / lambda / sqs）；`awsease.go` package doc 完善；
+  README 对齐本规格；删除已被本 `plan.md` 取代的旧 `doc/TODO.md`。
 - 验收：`go test ./... -race` 全绿；`go vet ./...` 干净；`go doc ./...` 输出与本规格一致。
 
 ---

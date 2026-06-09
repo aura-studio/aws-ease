@@ -8,7 +8,7 @@
 go get github.com/aura-studio/aws-ease
 ```
 
-> 完整设计规格见 [doc/plan.md](doc/plan.md)。
+> 可运行示例见 [examples/](examples)（`go run ./examples/localdev` 开箱即跑）；完整设计规格见 [doc/plan.md](doc/plan.md)。
 
 ## 解决什么问题
 
