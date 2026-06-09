@@ -554,7 +554,7 @@ c.Do(ctx, "lambda://order-create", body) // 实际打到 http://localhost:8080/l
   裸回 method/path/body。
 - 验收：`main_test.go` 验证两路由 echo 正确；配合 `WithLocalRedirect` 的端到端冒烟通过。
 
-### T09 — 示例、文档、CI
+### ✅ ~~T09 — 示例、文档、CI~~（已完成）
 - 目标：可发布质量。
 - 交付物：`example_test.go`（第 8 章示例，`go test` 可跑）；`awsease.go` package doc 完善；README/godoc 对齐本规格；
   `doc/TODO.md` 标记为被本 `plan.md` 取代。
