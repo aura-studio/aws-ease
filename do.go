@@ -1,8 +1,12 @@
 package awsease
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 )
 
 var errNotImplemented = errors.New("awsease: not implemented")
@@ -22,9 +26,40 @@ func (c *Client) DoRequest(ctx context.Context, req Request) (*Response, error) 
 	return nil, errNotImplemented
 }
 
-// doHTTP 执行 HTTP 后端。由 T04 实现。
+// doHTTP 执行 HTTP 后端：url 即完整请求地址（path/query 已在其中），Body 作请求体，
+// 非 2xx 不算传输错误（err==nil，OK()==false）。
 func (c *Client) doHTTP(ctx context.Context, req Request, url string) (*Response, error) {
-	return nil, errNotImplemented
+	var body io.Reader
+	if len(req.Body) > 0 {
+		body = bytes.NewReader(req.Body)
+	}
+	method := req.httpMethod()
+	httpReq, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		return nil, fmt.Errorf("awsease: build http request: %w", err)
+	}
+	for k, v := range req.Header {
+		httpReq.Header.Set(k, v)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("awsease: http %s %s: %w", method, url, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("awsease: read http response from %s: %w", url, err)
+	}
+
+	return &Response{
+		Backend:   BackendHTTP,
+		Status:    resp.StatusCode,
+		Header:    resp.Header,
+		Body:      respBody,
+		Requested: url,
+	}, nil
 }
 
 // doLambda 执行 Lambda 后端。由 T05 实现。

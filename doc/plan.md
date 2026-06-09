@@ -521,7 +521,7 @@ c.Do(ctx, "lambda://order-create", body) // 实际打到 http://localhost:8080/l
 - 验收：`OK()` 对四种场景（HTTP 2xx/非2xx、Lambda FuncError 空/非空、SQS 有/无 MessageID、Async）
   用表驱动测试逐一断言；`New()` 无参且只调 HTTP 时不触发任何 AWS 凭证加载。
 
-### T04 — doHTTP
+### ✅ ~~T04 — doHTTP~~（已完成）
 - 目标：HTTP 后端执行。
 - 交付物：`do.go` 中 `doHTTP`：target 整串作 URL、`Method` 默认推导、`Header` 写入、读 `http.Header` 多值响应头、
   填 `Status/Body/Header/Requested`。
