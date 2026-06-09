@@ -1,30 +1,55 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
-func TestEchoHandler(t *testing.T) {
+func TestEchoBareBody(t *testing.T) {
 	t.Parallel()
 
-	req := httptest.NewRequest(http.MethodPost, "/lambda/svc/do?x=1", bytes.NewBufferString("payload"))
-	w := httptest.NewRecorder()
+	srv := httptest.NewServer(newMux())
+	defer srv.Close()
 
-	echo("lambda")(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", w.Code)
+	cases := []struct {
+		name        string
+		path        string
+		wantBackend string
+	}{
+		{"lambda route", "/lambda/order-create", "lambda"},
+		{"sqs route", "/sqs/order-events", "sqs"},
 	}
 
-	var resp response
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Route != "lambda" || resp.Path != "/lambda/svc/do" || resp.Query["x"][0] != "1" || resp.Payload != "payload" {
-		t.Fatalf("unexpected response: %#v", resp)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := http.Post(srv.URL+tc.path, "application/json", strings.NewReader(`{"hello":"world"}`))
+			if err != nil {
+				t.Fatalf("post: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200", resp.StatusCode)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			if string(body) != `{"hello":"world"}` {
+				t.Errorf("body = %q, want bare echo", string(body))
+			}
+			if got := resp.Header.Get("X-AWS-Ease-Mock"); got != tc.wantBackend {
+				t.Errorf("X-AWS-Ease-Mock = %q, want %q", got, tc.wantBackend)
+			}
+			if got := resp.Header.Get("X-AWS-Ease-Method"); got != http.MethodPost {
+				t.Errorf("X-AWS-Ease-Method = %q, want POST", got)
+			}
+			if got := resp.Header.Get("X-AWS-Ease-Path"); got != tc.path {
+				t.Errorf("X-AWS-Ease-Path = %q, want %q", got, tc.path)
+			}
+			if got := resp.Header.Get("Content-Type"); got != "application/json" {
+				t.Errorf("Content-Type = %q, want application/json", got)
+			}
+		})
 	}
 }

@@ -548,7 +548,7 @@ c.Do(ctx, "lambda://order-create", body) // 实际打到 http://localhost:8080/l
 - 验收：地址非法/未知 scheme 返回对应哨兵错误（`errors.Is` 通过）；超时（context 优先于 `WithTimeout` 默认）表驱动验证；
   `WithLocalRedirect` 下 lambda://、sqs:// 走 HTTP path 验证。
 
-### T08 — mock 命令改造
+### ✅ ~~T08 — mock 命令改造~~（已完成）
 - 目标：本地 mock 去信封。
 - 交付物：改写 `cmd/aws-ease-mock/main.go`：保留 `/lambda/`、`/sqs/` 路由，echo 体去掉旧 `requestEnvelope` 耦合字段，
   裸回 method/path/body。
