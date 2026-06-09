@@ -508,7 +508,7 @@ c.Do(ctx, "lambda://order-create", body) // 实际打到 http://localhost:8080/l
   `response.go`/`do.go`；改写 `awsease.go`（package doc + `Version="0.2.0"` + `Backend` 常量）。
 - 验收：`go build ./...` 通过（允许空实现 stub）；`go vet ./...` 无残留死引用。
 
-### T02 — 地址解析 parseTarget + 本地重定向
+### ✅ ~~T02 — 地址解析 parseTarget + 本地重定向~~（已完成）
 - 目标：实现 `backend://target` 解析与 `WithLocalRedirect` 改写。
 - 交付物：`target.go` 内 `parseTarget(s) (Backend, addr string, err error)`、重定向改写函数、两个哨兵错误。
 - 验收：表驱动单测覆盖三 scheme（含 `sqs://https://…` 嵌套 URL、HTTP 保留整串、lambda 含 `/` 报 `ErrBadTarget`、
