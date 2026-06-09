@@ -7,6 +7,7 @@ import (
 	"time"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
+	awscfg "github.com/aws/aws-sdk-go-v2/config"
 	awslambda "github.com/aws/aws-sdk-go-v2/service/lambda"
 	awssqs "github.com/aws/aws-sdk-go-v2/service/sqs"
 )
@@ -126,12 +127,65 @@ func New(opts ...Option) *Client {
 	}
 }
 
-// lambdaClient 惰性返回 Lambda 客户端（注入优先，否则按 aws.Config 构建）。由 T05 实现。
-func (c *Client) lambdaClient(ctx context.Context) (LambdaAPI, error) {
-	return nil, errNotImplemented
+// awsConfig 惰性加载并缓存 aws.Config（注入的 WithAWSConfig 优先，否则 LoadDefaultConfig 一次）。
+func (c *Client) awsConfig(ctx context.Context) (awssdk.Config, error) {
+	c.cfgOnce.Do(func() {
+		if c.awsCfg != nil {
+			return // 已注入
+		}
+		cfg, err := awscfg.LoadDefaultConfig(ctx)
+		if err != nil {
+			c.initErr = err
+			return
+		}
+		c.awsCfg = &cfg
+	})
+	if c.awsCfg == nil {
+		return awssdk.Config{}, c.initErr
+	}
+	return *c.awsCfg, nil
 }
 
-// sqsClient 惰性返回 SQS 客户端（注入优先，否则按 aws.Config 构建）。由 T06 实现。
+// lambdaClient 惰性返回 Lambda 客户端（注入优先，否则按 aws.Config 构建，应用 WithAWSEndpoint）。
+func (c *Client) lambdaClient(ctx context.Context) (LambdaAPI, error) {
+	c.lambdaOnce.Do(func() {
+		if c.lambdaAPI != nil {
+			return // 已注入
+		}
+		cfg, err := c.awsConfig(ctx)
+		if err != nil {
+			return
+		}
+		c.lambdaAPI = awslambda.NewFromConfig(cfg, func(o *awslambda.Options) {
+			if c.awsEndpoint != "" {
+				o.BaseEndpoint = awssdk.String(c.awsEndpoint)
+			}
+		})
+	})
+	if c.lambdaAPI == nil {
+		return nil, c.initErr
+	}
+	return c.lambdaAPI, nil
+}
+
+// sqsClient 惰性返回 SQS 客户端（注入优先，否则按 aws.Config 构建，应用 WithAWSEndpoint）。
 func (c *Client) sqsClient(ctx context.Context) (SQSAPI, error) {
-	return nil, errNotImplemented
+	c.sqsOnce.Do(func() {
+		if c.sqsAPI != nil {
+			return // 已注入
+		}
+		cfg, err := c.awsConfig(ctx)
+		if err != nil {
+			return
+		}
+		c.sqsAPI = awssqs.NewFromConfig(cfg, func(o *awssqs.Options) {
+			if c.awsEndpoint != "" {
+				o.BaseEndpoint = awssdk.String(c.awsEndpoint)
+			}
+		})
+	})
+	if c.sqsAPI == nil {
+		return nil, c.initErr
+	}
+	return c.sqsAPI, nil
 }

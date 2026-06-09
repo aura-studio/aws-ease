@@ -1,5 +1,7 @@
 package awsease
 
+import "net/http"
+
 // Request 是细控请求对象。普通结构体，命名字段的 struct literal 已足够自描述，
 // 不用 builder，也不用 per-call functional option。只填 Target（+ 多数场景的 Body）即可用；
 // 其余零值都是合理默认；字段按后端分组，文档标注哪个字段对哪个后端有效。
@@ -21,8 +23,14 @@ type Request struct {
 	DedupID    string            // FIFO MessageDeduplicationId。
 }
 
-// httpMethod 返回本次 HTTP 请求实际使用的方法：显式 Method 优先，否则按 Body 是否为空推导。
+// httpMethod 返回本次 HTTP 请求实际使用的方法：显式 Method 优先，否则按 Body 是否为空推导
+//（无 Body -> GET，有 Body -> POST）。
 func (r Request) httpMethod() string {
-	// 由 T03 实现。
-	return r.Method
+	if r.Method != "" {
+		return r.Method
+	}
+	if len(r.Body) == 0 {
+		return http.MethodGet
+	}
+	return http.MethodPost
 }

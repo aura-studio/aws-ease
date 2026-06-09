@@ -34,8 +34,19 @@ type Response struct {
 //   - Lambda 异步 ：已被 AWS 接受投递（fire-and-forget，不代表函数已成功执行，见 Async 字段）。
 //   - SQS         ：MessageID != ""。
 func (r *Response) OK() bool {
-	// 由 T03 实现。
-	return false
+	switch r.Backend {
+	case BackendHTTP:
+		return r.Status >= 200 && r.Status < 300
+	case BackendLambda:
+		if r.Async {
+			return true // 已被 AWS 接受投递（fire-and-forget），不代表函数已成功执行
+		}
+		return r.FuncError == ""
+	case BackendSQS:
+		return r.MessageID != ""
+	default:
+		return false
+	}
 }
 
 // JSON 便捷反序列化 Body（HTTP 响应体 / Lambda 返回 payload）。

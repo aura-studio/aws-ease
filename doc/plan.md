@@ -514,7 +514,7 @@ c.Do(ctx, "lambda://order-create", body) // 实际打到 http://localhost:8080/l
 - 验收：表驱动单测覆盖三 scheme（含 `sqs://https://…` 嵌套 URL、HTTP 保留整串、lambda 含 `/` 报 `ErrBadTarget`、
   未知 scheme 报 `ErrUnknownScheme`、空串报错）；重定向把 `lambda://fn`/`sqs://q` 正确改写为 `{base}/lambda/fn`、`{base}/sqs/q`。
 
-### T03 — Request / Response / Client 骨架 + options
+### ✅ ~~T03 — Request / Response / Client 骨架 + options~~（已完成）
 - 目标：定义统一请求/响应与构造。
 - 交付物：`request.go`（含 Method 默认推导）、`response.go`（`OK()`/`JSON()`/`String()`，按第 4 章填充表）、
   `client.go`（`Client`/`config`/`New`/七个 `With*` Option/惰性 AWS 构建 + `sync.Once` + QueueUrl 缓存 `sync.RWMutex`）。
