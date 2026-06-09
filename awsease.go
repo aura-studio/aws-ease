@@ -1,16 +1,26 @@
-// Package awsease 提供对常用 AWS 调用的便捷封装。
+// Package awsease 提供对 HTTP / AWS Lambda / AWS SQS 的统一、便捷封装。
 //
-// 核心思想是「统一寻址 + 可插拔传输」：调用方只面向一个逻辑目标地址
-// （形如 lambda://order-service/v1/create 或 sqs://order-events），
-// 由解析器（resolver）将地址拆解为 scheme/host/path，再由对应的传输
-// 后端（transport）真正执行——HTTP 后端发起 HTTP 请求、Lambda 后端
-// 调用 lambda.Invoke、SQS 后端调用 SendMessage。
+// 心智模型只有「地址 + Body -> Response」：
+//   - 地址是 backend://target 字符串，scheme 决定后端（http/https/lambda/sqs）。
+//   - Response 用 Backend 标签 + 后端专属字段诚实区分三种语义，绝不给非 HTTP 后端伪造状态码。
 //
-// 这样同一段业务代码在本地开发时可以把 lambda:// 重写到本地的 HTTP
-// mock 服务，在生产环境则直连真实的 AWS Lambda，无需改动调用代码。
+// 主入口是 Client.Do(ctx, target, body)；需要细控时用 Client.DoRequest(ctx, Request)。
+// 本地/生产切换靠换地址串，或 New(WithLocalRedirect(base))。
 //
-// 详细的设计思路与开发任务清单见 doc/TODO.md。
+// 设计规格见 doc/plan.md。
 package awsease
 
-// Version 是当前模块的语义化版本号。
-const Version = "0.1.0"
+// Version 是当前模块语义化版本号。
+const Version = "0.2.0"
+
+// Backend 是后端类型，三选一。它是 Response 的「自解释标签」，由地址 scheme 推导。
+type Backend string
+
+const (
+	// BackendHTTP 表示 http:// 或 https://，标准 HTTP 请求/响应。
+	BackendHTTP Backend = "http"
+	// BackendLambda 表示 lambda://<fn>，lambda.Invoke（同步取 payload，或异步 Event 即发即忘）。
+	BackendLambda Backend = "lambda"
+	// BackendSQS 表示 sqs://<queue>，sqs.SendMessage（推送取 MessageId）。
+	BackendSQS Backend = "sqs"
+)
