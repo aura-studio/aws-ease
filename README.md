@@ -98,6 +98,22 @@ go run ./cmd/aws-ease-mock
 
 单测里 Lambda / SQS 用 `WithLambdaAPI(fake)` / `WithSQSAPI(fake)` 注入桩，完全不碰 AWS。
 
+## 集成测试（真实 AWS，opt-in）
+
+`integration_test.go` 用 build tag `integration` 隔离，默认 `go test`/CI **不会**编译运行。
+需要真实 AWS 凭证（环境变量或 `~/.aws`），会自建并清理临时资源（SQS 队列 / Lambda 函数）：
+
+```bash
+# HTTP（checkip.amazonaws.com）+ SQS（建队列→发送→收回→删队列）+ Lambda 错误路径
+go test -tags integration -run Integration -v
+
+# 额外做一次真实 Lambda 成功调用（建一次性 echo 函数→invoke→删除，复用现有执行角色）
+AWS_EASE_IT_LAMBDA_CREATE=1 go test -tags integration -run Integration -v
+```
+
+> 建议用最小权限 IAM 用户（临时 SQS 队列 + `lambda:InvokeFunction`，`AWS_EASE_IT_LAMBDA_CREATE`
+> 另需 `lambda:CreateFunction/DeleteFunction` 等），不要用 root key。
+
 ## License
 
 MIT
