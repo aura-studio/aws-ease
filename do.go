@@ -3,7 +3,6 @@ package awsease
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,8 +16,6 @@ import (
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
-var errNotImplemented = errors.New("awsease: not implemented")
-
 // Do 是主入口：解析 target 的 scheme -> 选后端 -> 执行 -> 返回统一 Response。
 // 等价于 DoRequest(ctx, Request{Target: target, Body: body})。
 func (c *Client) Do(ctx context.Context, target string, body []byte) (*Response, error) {
@@ -30,8 +27,29 @@ func (c *Client) Do(ctx context.Context, target string, body []byte) (*Response,
 // 错误约定：返回的 error 仅表示传输层失败，且 error 非 nil 时 resp 为 nil；
 // 业务层失败（HTTP 非 2xx / Lambda FuncError 非空）不返回 error，而是 resp.OK()==false。
 func (c *Client) DoRequest(ctx context.Context, req Request) (*Response, error) {
-	// 由 T07 实现（parseTarget -> 可选重定向 -> switch backend -> 统一 context.WithTimeout）。
-	return nil, errNotImplemented
+	backend, addr, err := parseTarget(req.Target)
+	if err != nil {
+		return nil, err
+	}
+	backend, addr = c.redirectTarget(backend, addr)
+
+	// 统一超时：默认套一层 context.WithTimeout；调用方若已设更短 deadline，context 自动取更早者。
+	if c.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
+
+	switch backend {
+	case BackendHTTP:
+		return c.doHTTP(ctx, req, addr)
+	case BackendLambda:
+		return c.doLambda(ctx, req, addr)
+	case BackendSQS:
+		return c.doSQS(ctx, req, addr)
+	default:
+		return nil, fmt.Errorf("awsease: %w: %q", ErrUnknownScheme, backend)
+	}
 }
 
 // doHTTP 执行 HTTP 后端：url 即完整请求地址（path/query 已在其中），Body 作请求体，

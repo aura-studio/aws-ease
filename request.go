@@ -24,7 +24,7 @@ type Request struct {
 }
 
 // httpMethod 返回本次 HTTP 请求实际使用的方法：显式 Method 优先，否则按 Body 是否为空推导
-//（无 Body -> GET，有 Body -> POST）。
+// （无 Body -> GET，有 Body -> POST）。
 func (r Request) httpMethod() string {
 	if r.Method != "" {
 		return r.Method

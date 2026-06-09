@@ -43,7 +43,7 @@ func TestOptionsApply(t *testing.T) {
 }
 
 // TestLazyClientsReturnInjectedWithoutAWS 验证注入 mock 后，惰性获取不触发任何 AWS 凭证加载
-//（LoadDefaultConfig 永不被调用，cfgOnce 不执行）。
+// （LoadDefaultConfig 永不被调用，cfgOnce 不执行）。
 func TestLazyClientsReturnInjectedWithoutAWS(t *testing.T) {
 	fl := &fakeLambda{}
 	fs := &fakeSQS{}

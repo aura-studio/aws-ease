@@ -541,7 +541,7 @@ c.Do(ctx, "lambda://order-create", body) // 实际打到 http://localhost:8080/l
 - 验收：fake `SQSAPI` 断言 GroupID+DedupID 正确传递、属性键名不被改写、非 UTF-8 body 返回明确 error、
   队列名只解析一次（缓存命中）；`Response.Status==0 && Body==nil && MessageID!=""`。
 
-### T07 — Do / DoRequest 编排 + 重定向 + 超时
+### ✅ ~~T07 — Do / DoRequest 编排 + 重定向 + 超时~~（已完成）
 - 目标：把三后端串成入口。
 - 交付物：`Do`（= `DoRequest(Request{Target,Body})`）与 `DoRequest`：`parseTarget` -> 可选重定向 -> `switch backend`
   分发、统一 `context.WithTimeout`、`err!=nil 时 resp==nil` 约定。
