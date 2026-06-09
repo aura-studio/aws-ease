@@ -527,7 +527,7 @@ c.Do(ctx, "lambda://order-create", body) // 实际打到 http://localhost:8080/l
   填 `Status/Body/Header/Requested`。
 - 验收：`httptest.NewServer` 端到端测 GET/POST、自定义 Header、非 2xx 时 `err==nil && OK()==false`、多值响应头不丢失。
 
-### T05 — doLambda（去信封 + 诚实 FuncError + Async）
+### ✅ ~~T05 — doLambda（去信封 + 诚实 FuncError + Async）~~（已完成）
 - 目标：Lambda 后端执行。
 - 交付物：`doLambda`：`Body` 原样作 `Payload`（**无信封**）、`Async` -> `InvocationType=Event`、同步填 `Body`、
   `FunctionError` -> `FuncError`（**不伪造 Status，不返回 transport error**）、填 `Async/Requested`。

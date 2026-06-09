@@ -7,6 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	awssdk "github.com/aws/aws-sdk-go-v2/aws"
+	awslambda "github.com/aws/aws-sdk-go-v2/service/lambda"
+	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 )
 
 var errNotImplemented = errors.New("awsease: not implemented")
@@ -62,9 +66,39 @@ func (c *Client) doHTTP(ctx context.Context, req Request, url string) (*Response
 	}, nil
 }
 
-// doLambda 执行 Lambda 后端。由 T05 实现。
+// doLambda 执行 Lambda 后端：Body 原样作 Payload（无信封）；Async 走 InvocationType=Event；
+// 函数内部错误用 FuncError 表达（不伪造 Status、不返回传输 error）。
 func (c *Client) doLambda(ctx context.Context, req Request, function string) (*Response, error) {
-	return nil, errNotImplemented
+	invoker, err := c.lambdaClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("awsease: lambda client: %w", err)
+	}
+
+	invType := lambdatypes.InvocationTypeRequestResponse
+	if req.Async {
+		invType = lambdatypes.InvocationTypeEvent
+	}
+
+	out, err := invoker.Invoke(ctx, &awslambda.InvokeInput{
+		FunctionName:   awssdk.String(function),
+		InvocationType: invType,
+		Payload:        req.Body, // 原样透传，无 {path,query,payload} 信封
+	})
+	if err != nil {
+		return nil, fmt.Errorf("awsease: invoke lambda %q: %w", function, err)
+	}
+
+	resp := &Response{
+		Backend:   BackendLambda,
+		Async:     req.Async,
+		Requested: function,
+	}
+	if req.Async {
+		return resp, nil // 即发即忘：Body/Status 留零，OK() 由 Async 判 true
+	}
+	resp.Body = out.Payload
+	resp.FuncError = awssdk.ToString(out.FunctionError)
+	return resp, nil
 }
 
 // doSQS 执行 SQS 后端。由 T06 实现。
