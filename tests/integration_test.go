@@ -13,6 +13,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -42,23 +43,18 @@ func itConfig(t *testing.T) awssdk.Config {
 }
 
 // TestIntegrationHTTP：对真实公网端点发 HTTP 请求，验证 HTTP 整链路。
-// checkip.amazonaws.com 是 AWS 的稳定服务，GET 返回 200 + 纯文本公网 IP。
+// checkip.amazonaws.com 是 AWS 的稳定服务，GET 返回 200 + 纯文本公网 IP；
+// 新 API 下 2xx 即 err 为 nil，返回体非空即视为通过。
 func TestIntegrationHTTP(t *testing.T) {
 	c := awsease.New()
-	resp, err := c.Do(context.Background(), "https://checkip.amazonaws.com/", nil)
+	body, err := c.Invoke(context.Background(), "https://checkip.amazonaws.com/", nil)
 	if err != nil {
-		t.Fatalf("http Do: %v", err)
+		t.Fatalf("http Invoke: %v", err)
 	}
-	if resp.Backend != awsease.BackendHTTP {
-		t.Errorf("backend = %q, want http", resp.Backend)
-	}
-	if resp.Status != 200 || !resp.OK() {
-		t.Errorf("status = %d, OK = %v; want 200/true", resp.Status, resp.OK())
-	}
-	if len(resp.Body) == 0 {
+	if len(body) == 0 {
 		t.Errorf("expected a non-empty body (the public IP)")
 	}
-	t.Logf("HTTP status=%d ok=%v body=%q", resp.Status, resp.OK(), resp.String())
+	t.Logf("HTTP ok, body=%q", body)
 }
 
 // TestIntegrationSQS：建临时队列 -> 用 aws-ease 按队列名发送（触发 GetQueueUrl 解析+缓存）
@@ -84,18 +80,16 @@ func TestIntegrationSQS(t *testing.T) {
 
 	c := awsease.New(awsease.WithAWSConfig(cfg))
 
-	body := `{"hello":"aws-ease","n":1}`
-	resp, err := c.Do(ctx, "sqs://"+qname, []byte(body))
+	msg := `{"hello":"aws-ease","n":1}`
+	body, err := c.Invoke(ctx, "sqs://"+qname, []byte(msg))
 	if err != nil {
-		t.Fatalf("sqs Do: %v", err)
+		t.Fatalf("sqs Invoke: %v", err)
 	}
-	if resp.Backend != awsease.BackendSQS || resp.MessageID == "" || !resp.OK() {
-		t.Fatalf("resp = %+v; want sqs/MessageID/ok", resp)
+	// 推送语义：发送成功返回 (nil, nil)，MessageId 等多余信息不返回。
+	if body != nil {
+		t.Errorf("dishonest sqs body: %q (want nil)", body)
 	}
-	if resp.Status != 0 || resp.Body != nil {
-		t.Errorf("dishonest sqs response: status=%d bodyLen=%d (want 0/nil)", resp.Status, len(resp.Body))
-	}
-	t.Logf("sent: MessageID=%s requested=%s", resp.MessageID, resp.Requested)
+	t.Logf("sent message to %s via aws-ease ✓", qname)
 
 	// 收回来核对内容确实进了队列。
 	var got string
@@ -113,17 +107,16 @@ func TestIntegrationSQS(t *testing.T) {
 			got = awssdk.ToString(out.Messages[0].Body)
 		}
 	}
-	if got != body {
-		t.Fatalf("received %q, want %q", got, body)
+	if got != msg {
+		t.Fatalf("received %q, want %q", got, msg)
 	}
 	t.Log("received message body matches sent payload ✓")
 
 	// 第二次发送：队列名->URL 缓存命中后仍可用。
-	resp2, err := c.Do(ctx, "sqs://"+qname, []byte(`{"n":2}`))
-	if err != nil {
+	if _, err := c.Invoke(ctx, "sqs://"+qname, []byte(`{"n":2}`)); err != nil {
 		t.Fatalf("second send (cache hit): %v", err)
 	}
-	t.Logf("second send (cached) ok: MessageID=%s", resp2.MessageID)
+	t.Log("second send (cached queue url) ok ✓")
 }
 
 // TestIntegrationLambdaError：调一个不存在的函数，验证真实鉴权+路由+错误传播
@@ -133,14 +126,14 @@ func TestIntegrationLambdaError(t *testing.T) {
 	cfg := itConfig(t)
 	c := awsease.New(awsease.WithAWSConfig(cfg))
 
-	resp, err := c.Do(ctx, "lambda://aws-ease-it-nonexistent-fn", []byte("{}"))
+	body, err := c.Invoke(ctx, "lambda://aws-ease-it-nonexistent-fn", []byte("{}"))
 	if err == nil {
-		t.Fatalf("expected error invoking nonexistent function, got resp=%+v", resp)
+		t.Fatalf("expected error invoking nonexistent function, got body=%q", body)
 	}
-	if resp != nil {
-		t.Errorf("resp must be nil on transport error, got %+v", resp)
+	if body != nil {
+		t.Errorf("body must be nil on error, got %q", body)
 	}
-	t.Logf("lambda not-found surfaced as transport error ✓: %v", err)
+	t.Logf("lambda not-found surfaced as err ✓: %v", err)
 
 	lc := lambda.NewFromConfig(cfg)
 	out, lerr := lc.ListFunctions(ctx, &lambda.ListFunctionsInput{})
@@ -155,7 +148,8 @@ func TestIntegrationLambdaError(t *testing.T) {
 }
 
 // TestIntegrationLambdaInvoke：真实成功调用。建一个一次性 echo 函数（复用现有函数的执行角色，
-// 不新建 IAM）-> 用 aws-ease invoke -> 断言回显 -> 删除。默认跳过，需 AWS_EASE_IT_LAMBDA_CREATE=1。
+// 不新建 IAM）-> 用 aws-ease invoke -> 断言返回的 payload 字节 -> 删除。
+// 默认跳过，需 AWS_EASE_IT_LAMBDA_CREATE=1。
 func TestIntegrationLambdaInvoke(t *testing.T) {
 	if os.Getenv("AWS_EASE_IT_LAMBDA_CREATE") == "" {
 		t.Skip("set AWS_EASE_IT_LAMBDA_CREATE=1 to create a throwaway echo Lambda and invoke it")
@@ -196,27 +190,22 @@ func TestIntegrationLambdaInvoke(t *testing.T) {
 	t.Logf("created+active function %s (borrowed role %s)", fnName, role)
 
 	c := awsease.New(awsease.WithAWSConfig(cfg))
-	resp, err := c.Do(ctx, "lambda://"+fnName, []byte(`{"hello":"aws-ease"}`))
+	body, err := c.Invoke(ctx, "lambda://"+fnName, []byte(`{"hello":"aws-ease"}`))
 	if err != nil {
 		t.Fatalf("invoke via aws-ease: %v", err)
 	}
-	if resp.FuncError != "" {
-		t.Fatalf("unexpected FuncError %q, body=%s", resp.FuncError, resp)
-	}
-	if !resp.OK() || resp.Backend != awsease.BackendLambda {
-		t.Fatalf("resp = %+v; want lambda/ok", resp)
-	}
+	// 同步成功即 err 为 nil，body 是函数返回的 payload 字节（无信封），直接解码断言。
 	var got struct {
 		Echo map[string]any `json:"echo"`
 		OK   bool           `json:"ok"`
 	}
-	if err := resp.JSON(&got); err != nil {
-		t.Fatalf("decode lambda payload %q: %v", resp.String(), err)
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode lambda payload %q: %v", body, err)
 	}
 	if !got.OK || got.Echo["hello"] != "aws-ease" {
-		t.Fatalf("echo mismatch: %s", resp.String())
+		t.Fatalf("echo mismatch: %s", body)
 	}
-	t.Logf("lambda real invoke ok ✓, returned payload: %s", resp.String())
+	t.Logf("lambda real invoke ok ✓, returned payload: %s", body)
 }
 
 func waitLambdaActive(ctx context.Context, lc *lambda.Client, fn string) error {

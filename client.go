@@ -43,14 +43,13 @@ type Client struct {
 	redirectBase string
 
 	// AWS 相关：真实客户端惰性加载，只用 HTTP 时不触发任何凭证读取。
+	// 只在成功时写缓存：初始化失败不留任何状态，下次调用整体重试——
+	// 瞬态失败（SSO 过期、IMDS 超时、调用方 deadline 太短）不会永久污染客户端。
 	awsEndpoint string
+	initMu      sync.Mutex
 	awsCfg      *awssdk.Config
 	lambdaAPI   LambdaAPI
 	sqsAPI      SQSAPI
-	cfgOnce     sync.Once
-	lambdaOnce  sync.Once
-	sqsOnce     sync.Once
-	initErr     error
 
 	// SQS 队列名 -> QueueUrl 缓存。
 	mu        sync.RWMutex
@@ -91,15 +90,15 @@ func WithAWSEndpoint(url string) Option {
 }
 
 // WithTimeout 设置每次调用的默认超时（内部以 context.WithTimeout 套在传入 ctx 上）。默认 30s。
+// 传 0 或负值表示禁用库级超时、完全交给调用方的 ctx（如 Lambda 同步最长可跑 15 分钟的场景）。
 func WithTimeout(d time.Duration) Option {
-	return func(c *config) {
-		if d > 0 {
-			c.timeout = d
-		}
-	}
+	return func(c *config) { c.timeout = d }
 }
 
-// WithLocalRedirect 把所有 lambda://、sqs:// 调用改写为对 base 的 HTTP mock 请求（本地切换，可选）。
+// WithLocalRedirect 把所有 lambda://、sqs:// 调用改写为对 base 的 HTTP mock 请求（本地切换，可选）：
+// lambda://<fn> -> {base}/lambda/<fn>，sqs://<q> -> {base}/sqs/<q>，特性参数原样转为重定向 URL
+// 的 query 供 mock 观察。返回值与校验语义和真实后端对齐（sqs/异步成功返回 nil body、sqs 仍校验 UTF-8），
+// 本地联调验证过的行为切回真实 AWS 不变。
 func WithLocalRedirect(base string) Option {
 	return func(c *config) { c.redirectBase = base }
 }
@@ -127,65 +126,56 @@ func New(opts ...Option) *Client {
 	}
 }
 
-// awsConfig 惰性加载并缓存 aws.Config（注入的 WithAWSConfig 优先，否则 LoadDefaultConfig 一次）。
-func (c *Client) awsConfig(ctx context.Context) (awssdk.Config, error) {
-	c.cfgOnce.Do(func() {
-		if c.awsCfg != nil {
-			return // 已注入
-		}
-		cfg, err := awscfg.LoadDefaultConfig(ctx)
-		if err != nil {
-			c.initErr = err
-			return
-		}
-		c.awsCfg = &cfg
-	})
-	if c.awsCfg == nil {
-		return awssdk.Config{}, c.initErr
+// awsConfigLocked 返回缓存的 aws.Config，必要时加载（调用方须持有 initMu）。
+// 注入的 WithAWSConfig 优先；加载失败不写缓存，下次调用重试。
+func (c *Client) awsConfigLocked(ctx context.Context) (awssdk.Config, error) {
+	if c.awsCfg != nil {
+		return *c.awsCfg, nil
 	}
-	return *c.awsCfg, nil
+	cfg, err := awscfg.LoadDefaultConfig(ctx)
+	if err != nil {
+		return awssdk.Config{}, err
+	}
+	c.awsCfg = &cfg
+	return cfg, nil
 }
 
 // lambdaClient 惰性返回 Lambda 客户端（注入优先，否则按 aws.Config 构建，应用 WithAWSEndpoint）。
+// 构建成功才缓存；并发调用在初始化期间串行（它们本来也都得等同一份 cfg）。
 func (c *Client) lambdaClient(ctx context.Context) (LambdaAPI, error) {
-	c.lambdaOnce.Do(func() {
-		if c.lambdaAPI != nil {
-			return // 已注入
-		}
-		cfg, err := c.awsConfig(ctx)
-		if err != nil {
-			return
-		}
-		c.lambdaAPI = awslambda.NewFromConfig(cfg, func(o *awslambda.Options) {
-			if c.awsEndpoint != "" {
-				o.BaseEndpoint = awssdk.String(c.awsEndpoint)
-			}
-		})
-	})
-	if c.lambdaAPI == nil {
-		return nil, c.initErr
+	c.initMu.Lock()
+	defer c.initMu.Unlock()
+	if c.lambdaAPI != nil {
+		return c.lambdaAPI, nil
 	}
+	cfg, err := c.awsConfigLocked(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.lambdaAPI = awslambda.NewFromConfig(cfg, func(o *awslambda.Options) {
+		if c.awsEndpoint != "" {
+			o.BaseEndpoint = awssdk.String(c.awsEndpoint)
+		}
+	})
 	return c.lambdaAPI, nil
 }
 
 // sqsClient 惰性返回 SQS 客户端（注入优先，否则按 aws.Config 构建，应用 WithAWSEndpoint）。
+// 构建成功才缓存；并发调用在初始化期间串行。
 func (c *Client) sqsClient(ctx context.Context) (SQSAPI, error) {
-	c.sqsOnce.Do(func() {
-		if c.sqsAPI != nil {
-			return // 已注入
-		}
-		cfg, err := c.awsConfig(ctx)
-		if err != nil {
-			return
-		}
-		c.sqsAPI = awssqs.NewFromConfig(cfg, func(o *awssqs.Options) {
-			if c.awsEndpoint != "" {
-				o.BaseEndpoint = awssdk.String(c.awsEndpoint)
-			}
-		})
-	})
-	if c.sqsAPI == nil {
-		return nil, c.initErr
+	c.initMu.Lock()
+	defer c.initMu.Unlock()
+	if c.sqsAPI != nil {
+		return c.sqsAPI, nil
 	}
+	cfg, err := c.awsConfigLocked(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.sqsAPI = awssqs.NewFromConfig(cfg, func(o *awssqs.Options) {
+		if c.awsEndpoint != "" {
+			o.BaseEndpoint = awssdk.String(c.awsEndpoint)
+		}
+	})
 	return c.sqsAPI, nil
 }

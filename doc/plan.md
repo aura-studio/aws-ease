@@ -1,3 +1,7 @@
+> **历史文档**：本文是 v0.2 重构时的设计规格，仅作演进记录保留。现行 API 已演进为 v0.4
+> （唯一公开入口 `Invoke(ctx, url, payload) ([]byte, error)`，特性参数走 URL query；
+> `Request`/`Response`/`Do`/`DoRequest` 已删除），以 [README](../README.md) 与代码为准。
+
 # aws-ease 最终设计规格（v0.2.0 重构）
 
 > 本文是重构的唯一蓝图。它经过「三套设计 → 对抗式评审 → 综合」得出诚实的 Response 模型与删除清单，

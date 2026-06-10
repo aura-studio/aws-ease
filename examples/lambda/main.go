@@ -1,8 +1,9 @@
 // Command lambda 演示用 aws-ease 调 AWS Lambda。
 //
-// 统一调用模式：c.Do(ctx, "lambda://"+目标, []byte(payload))。
-// Body 原样即 payload（无信封）；函数内部报错见 resp.FuncError；
-// 异步等细控用 DoRequest（本例只演示统一的 Do）。
+// 统一调用模式：c.Invoke(ctx, "lambda://<fn>", payload) -> (body, err)。
+// payload 原样即 lambda payload（无信封），body 即函数返回的 payload 字节；
+// 函数内部报错（FunctionError）也走 err，错误串含函数错误名与错误 payload；
+// 异步即发即忘在 URL 上加 ?async=true（或 ?async=1），成功返回 nil body。
 //
 // 运行（需 AWS 凭证）：
 //
@@ -33,10 +34,10 @@ func main() {
 	}
 	c := awsease.New(awsease.WithAWSConfig(cfg))
 
-	resp, err := c.Do(context.Background(), "lambda://"+target, []byte(`{"event":"created","id":1}`))
+	// err 非 nil 即失败（地址非法、传输失败、函数内部错误都在这里）；成功时 body 即返回 payload。
+	body, err := c.Invoke(context.Background(), "lambda://"+target, []byte(`{"event":"created","id":1}`))
 	if err != nil {
-		log.Fatalf("transport error: %v", err)
+		log.Fatalf("invoke failed: %v", err)
 	}
-	fmt.Printf("backend=%s ok=%v status=%d funcError=%q messageID=%q body=%s\n",
-		resp.Backend, resp.OK(), resp.Status, resp.FuncError, resp.MessageID, resp.String())
+	fmt.Printf("payload=%s\n", body)
 }

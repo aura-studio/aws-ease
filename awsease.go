@@ -1,26 +1,52 @@
 // Package awsease 提供对 HTTP / AWS Lambda / AWS SQS 的统一、便捷封装。
 //
-// 心智模型只有「地址 + Body -> Response」：
-//   - 地址是 backend://target 字符串，scheme 决定后端（http/https/lambda/sqs）。
-//   - Response 用 Backend 标签 + 后端专属字段诚实区分三种语义，绝不给非 HTTP 后端伪造状态码。
+// 心智模型只有一行：「Invoke(ctx, url, payload) -> (body, err)」。
+//   - url 是 backend://target 字符串，scheme 决定后端（http/https/lambda/sqs）；
+//     所有特性参数（HTTP method/header、Lambda 异步、SQS 属性/FIFO）以 query 参数写在 url 里。
+//   - payload 与返回值都只是有效数据本身，原样透传，库不包任何信封。
+//   - 一切失败（传输失败、HTTP 非 2xx、Lambda 函数内部错误）都通过 err 表达，不返回多余信息。
 //
-// 主入口是 Client.Do(ctx, target, body)；需要细控时用 Client.DoRequest(ctx, Request)。
-// 本地/生产切换靠换地址串，或 New(WithLocalRedirect(base))。
-//
-// 设计规格见 doc/plan.md。
+// 主入口是包级 Invoke；需要注入配置（AWS config、mock、超时、本地重定向）时
+// 用 New(opts...) 构造 Client 再调 Client.Invoke。
 package awsease
 
-// Version 是当前模块语义化版本号。
-const Version = "0.2.0"
+import (
+	"context"
+	"sync"
+)
 
-// Backend 是后端类型，三选一。它是 Response 的「自解释标签」，由地址 scheme 推导。
-type Backend string
+// Version 是当前模块语义化版本号。
+const Version = "0.4.0"
+
+// backend 是后端类型，三选一，由 url 的 scheme 推导。
+type backend string
 
 const (
-	// BackendHTTP 表示 http:// 或 https://，标准 HTTP 请求/响应。
-	BackendHTTP Backend = "http"
-	// BackendLambda 表示 lambda://<fn>，lambda.Invoke（同步取 payload，或异步 Event 即发即忘）。
-	BackendLambda Backend = "lambda"
-	// BackendSQS 表示 sqs://<queue>，sqs.SendMessage（推送取 MessageId）。
-	BackendSQS Backend = "sqs"
+	backendHTTP   backend = "http"   // http:// 或 https://，标准 HTTP 请求/响应
+	backendLambda backend = "lambda" // lambda://<fn>，lambda.Invoke
+	backendSQS    backend = "sqs"    // sqs://<queue>，sqs.SendMessage
 )
+
+var (
+	defaultClient     *Client
+	defaultClientOnce sync.Once
+)
+
+// Invoke 用包级默认客户端执行一次调用（默认超时、默认 AWS 凭证链，惰性初始化、并发安全）。
+// 需要细控基础设施时用 New(opts...).Invoke。
+//
+// url 形如 backend://target[?特性参数]：
+//
+//	http/https：整串即请求 URL。保留字参数以 "ease." 开头，发出前会被剥除，其余 query 原样保留：
+//	    ease.method=DELETE          指定 HTTP 方法（默认：无 payload -> GET，否则 POST）
+//	    ease.header.X-Custom=v      设置请求头（可多个）
+//	lambda://<fn>[?async=true|1]：fn 是函数名或 ARN；async=true（或 1）即发即忘（返回 body 为 nil）。
+//	sqs://<queue|queue-url>[?group=g&dedup=d&attr.k=v]：group/dedup 是 FIFO 字段，
+//	    attr.<key>=<value> 映射为 String 类型 MessageAttributes（可多个）。发送成功返回 body 为 nil。
+//
+// 错误约定：err 非 nil 即本次调用失败（地址非法、传输失败、HTTP 非 2xx、Lambda 函数内部错误），
+// 此时 body 恒为 nil；err 为 nil 时 body 是后端返回的有效数据（HTTP 响应体 / Lambda 返回 payload）。
+func Invoke(ctx context.Context, url string, payload []byte) ([]byte, error) {
+	defaultClientOnce.Do(func() { defaultClient = New() })
+	return defaultClient.Invoke(ctx, url, payload)
+}
