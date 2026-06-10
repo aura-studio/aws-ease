@@ -16,7 +16,7 @@ import (
 )
 
 // Version 是当前模块语义化版本号。
-const Version = "0.4.0"
+const Version = "0.4.1"
 
 // backend 是后端类型，三选一，由 url 的 scheme 推导。
 type backend string
