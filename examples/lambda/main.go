@@ -1,8 +1,12 @@
-// Command lambda 演示用 aws-ease 调 AWS Lambda（同步 Invoke + 异步 Event）。
+// Command lambda 演示用 aws-ease 调 AWS Lambda。
+//
+// 统一调用模式：c.Do(ctx, "lambda://"+目标, []byte(payload))。
+// Body 原样即 payload（无信封）；函数内部报错见 resp.FuncError；
+// 异步等细控用 DoRequest（本例只演示统一的 Do）。
 //
 // 运行（需 AWS 凭证）：
 //
-//	AWS_REGION=us-east-1 AWS_EASE_LAMBDA_FN=my-func go run ./examples/lambda
+//	AWS_REGION=us-east-1 AWS_EASE_LAMBDA_TARGET=my-func go run ./examples/lambda
 package main
 
 import (
@@ -17,9 +21,9 @@ import (
 )
 
 func main() {
-	fn := os.Getenv("AWS_EASE_LAMBDA_FN")
-	if fn == "" {
-		fmt.Println("set AWS_EASE_LAMBDA_FN=<function-name> (and AWS creds) to run this demo")
+	target := os.Getenv("AWS_EASE_LAMBDA_TARGET")
+	if target == "" {
+		fmt.Println("set AWS_EASE_LAMBDA_TARGET=<function-name> (and AWS creds) to run this demo")
 		return
 	}
 
@@ -28,26 +32,11 @@ func main() {
 		log.Fatalf("load aws config: %v", err)
 	}
 	c := awsease.New(awsease.WithAWSConfig(cfg))
-	ctx := context.Background()
 
-	// 1) 同步 Invoke：Body 原样即 payload（无信封），返回 payload 在 resp.Body。
-	resp, err := c.Do(ctx, "lambda://"+fn, []byte(`{"hello":"aws-ease"}`))
-	if err != nil {
-		log.Fatalf("transport error: %v", err) // 鉴权 / 网络 / 函数不存在
-	}
-	if resp.FuncError != "" { // 函数内部抛错，诚实暴露（不是假 502，也不是传输 error）
-		log.Fatalf("function error %s: %s", resp.FuncError, resp)
-	}
-	fmt.Printf("sync invoke ok, returned payload: %s\n", resp.String())
-
-	// 2) 异步 Event（即发即忘）：resp.OK() 仅表示已被 AWS 接受投递，不代表函数已执行成功。
-	resp, err = c.DoRequest(ctx, awsease.Request{
-		Target: "lambda://" + fn,
-		Body:   []byte(`{"async":true}`),
-		Async:  true,
-	})
+	resp, err := c.Do(context.Background(), "lambda://"+target, []byte(`{"event":"created","id":1}`))
 	if err != nil {
 		log.Fatalf("transport error: %v", err)
 	}
-	fmt.Printf("async invoke accepted=%v (body is nil: %v)\n", resp.OK(), resp.Body == nil)
+	fmt.Printf("backend=%s ok=%v status=%d funcError=%q messageID=%q body=%s\n",
+		resp.Backend, resp.OK(), resp.Status, resp.FuncError, resp.MessageID, resp.String())
 }

@@ -1,10 +1,12 @@
-// Command sqs 演示用 aws-ease 推送 SQS 消息（普通推送 + FIFO/属性）。
+// Command sqs 演示用 aws-ease 推送 SQS 消息。
+//
+// 统一调用模式：c.Do(ctx, "sqs://"+目标, []byte(payload))。
+// 目标可以是队列名（走 GetQueueUrl 解析+缓存）或完整队列 URL；回执见 resp.MessageID；
+// FIFO 的 GroupID/DedupID 与属性用 DoRequest（本例只演示统一的 Do）。
 //
 // 运行（需 AWS 凭证）：
 //
-//	AWS_REGION=us-east-1 AWS_EASE_SQS_QUEUE=my-queue go run ./examples/sqs
-//
-// 队列可以是队列名（走 GetQueueUrl 解析+缓存）或完整队列 URL。FIFO 队列名以 .fifo 结尾。
+//	AWS_REGION=us-east-1 AWS_EASE_SQS_TARGET=my-queue go run ./examples/sqs
 package main
 
 import (
@@ -12,7 +14,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 
@@ -20,9 +21,9 @@ import (
 )
 
 func main() {
-	queue := os.Getenv("AWS_EASE_SQS_QUEUE")
-	if queue == "" {
-		fmt.Println("set AWS_EASE_SQS_QUEUE=<queue-name | queue-url> (and AWS creds) to run this demo")
+	target := os.Getenv("AWS_EASE_SQS_TARGET")
+	if target == "" {
+		fmt.Println("set AWS_EASE_SQS_TARGET=<queue-name | queue-url> (and AWS creds) to run this demo")
 		return
 	}
 
@@ -31,27 +32,11 @@ func main() {
 		log.Fatalf("load aws config: %v", err)
 	}
 	c := awsease.New(awsease.WithAWSConfig(cfg))
-	ctx := context.Background()
 
-	// 1) 普通推送：回执在 resp.MessageID；Status/Body 诚实为零值。
-	resp, err := c.Do(ctx, "sqs://"+queue, []byte(`{"event":"created","id":1}`))
+	resp, err := c.Do(context.Background(), "sqs://"+target, []byte(`{"event":"created","id":1}`))
 	if err != nil {
 		log.Fatalf("transport error: %v", err)
 	}
-	fmt.Printf("sent: MessageID=%s (status=%d, body nil=%v)\n", resp.MessageID, resp.Status, resp.Body == nil)
-
-	// 2) FIFO + 属性：用 DoRequest 细控 GroupID / DedupID / Attributes。
-	if strings.HasSuffix(queue, ".fifo") {
-		resp, err = c.DoRequest(ctx, awsease.Request{
-			Target:     "sqs://" + queue,
-			Body:       []byte(`{"event":"created","id":2}`),
-			GroupID:    "orders",
-			DedupID:    "order-2",
-			Attributes: map[string]string{"type": "order"},
-		})
-		if err != nil {
-			log.Fatalf("transport error: %v", err)
-		}
-		fmt.Printf("FIFO sent: MessageID=%s\n", resp.MessageID)
-	}
+	fmt.Printf("backend=%s ok=%v status=%d funcError=%q messageID=%q body=%s\n",
+		resp.Backend, resp.OK(), resp.Status, resp.FuncError, resp.MessageID, resp.String())
 }

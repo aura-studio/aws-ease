@@ -33,7 +33,7 @@ func main() {
 	// 这两条调用在生产会真的打到 Lambda / SQS；本地全部落到 mock。
 	// 注意 resp.Backend 会如实显示 http —— 因为重定向后确实走了 HTTP。
 	for _, target := range []string{"lambda://order-create", "sqs://order-events"} {
-		resp, err := c.Do(ctx, target, []byte(`{"hello":"aws-ease"}`))
+		resp, err := c.Do(ctx, target, []byte(`{"event":"created","id":1}`))
 		if err != nil {
 			log.Fatalf("%s: %v", target, err)
 		}
