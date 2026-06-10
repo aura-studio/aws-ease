@@ -1,4 +1,4 @@
-package awsease
+package tests
 
 import (
 	"context"
@@ -7,26 +7,29 @@ import (
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	awssqs "github.com/aws/aws-sdk-go-v2/service/sqs"
+
+	awsease "github.com/aura-studio/aws-ease"
 )
 
-func TestDoSQSByName(t *testing.T) {
+func TestSQSByNameWithAttributesAndFIFO(t *testing.T) {
 	fs := &fakeSQS{
 		queueOut: &awssqs.GetQueueUrlOutput{QueueUrl: awssdk.String("https://sqs.test/123/order-events.fifo")},
 		sendOut:  &awssqs.SendMessageOutput{MessageId: awssdk.String("m-1")},
 	}
-	c := New(WithSQSAPI(fs))
+	c := awsease.New(awsease.WithSQSAPI(fs))
 
-	resp, err := c.doSQS(context.Background(), Request{
+	resp, err := c.DoRequest(context.Background(), awsease.Request{
+		Target:     "sqs://order-events.fifo",
 		Body:       []byte(`{"event":"created"}`),
 		GroupID:    "orders",
 		DedupID:    "order-7",
 		Attributes: map[string]string{"x-custom": "order"},
-	}, "order-events.fifo")
+	})
 	if err != nil {
-		t.Fatalf("doSQS: %v", err)
+		t.Fatalf("DoRequest: %v", err)
 	}
 
-	if resp.Backend != BackendSQS || resp.Status != 0 || resp.Body != nil {
+	if resp.Backend != awsease.BackendSQS || resp.Status != 0 || resp.Body != nil {
 		t.Errorf("resp = %+v; want sqs/status0/nil-body", resp)
 	}
 	if resp.MessageID != "m-1" || !resp.OK() {
@@ -41,11 +44,9 @@ func TestDoSQSByName(t *testing.T) {
 	if awssdk.ToString(fs.sendIn.MessageBody) != `{"event":"created"}` {
 		t.Errorf("MessageBody = %q", awssdk.ToString(fs.sendIn.MessageBody))
 	}
-	if awssdk.ToString(fs.sendIn.MessageGroupId) != "orders" {
-		t.Errorf("MessageGroupId = %q", awssdk.ToString(fs.sendIn.MessageGroupId))
-	}
-	if awssdk.ToString(fs.sendIn.MessageDeduplicationId) != "order-7" {
-		t.Errorf("MessageDeduplicationId = %q", awssdk.ToString(fs.sendIn.MessageDeduplicationId))
+	if awssdk.ToString(fs.sendIn.MessageGroupId) != "orders" || awssdk.ToString(fs.sendIn.MessageDeduplicationId) != "order-7" {
+		t.Errorf("FIFO fields wrong: group=%q dedup=%q",
+			awssdk.ToString(fs.sendIn.MessageGroupId), awssdk.ToString(fs.sendIn.MessageDeduplicationId))
 	}
 	// 属性键名不被归一化（不会变成 X-Custom）。
 	attr, ok := fs.sendIn.MessageAttributes["x-custom"]
@@ -57,15 +58,15 @@ func TestDoSQSByName(t *testing.T) {
 	}
 }
 
-func TestDoSQSCachesQueueURL(t *testing.T) {
+func TestSQSCachesQueueURL(t *testing.T) {
 	fs := &fakeSQS{
 		queueOut: &awssqs.GetQueueUrlOutput{QueueUrl: awssdk.String("https://sqs.test/q")},
 		sendOut:  &awssqs.SendMessageOutput{MessageId: awssdk.String("m")},
 	}
-	c := New(WithSQSAPI(fs))
+	c := awsease.New(awsease.WithSQSAPI(fs))
 	for i := 0; i < 3; i++ {
-		if _, err := c.doSQS(context.Background(), Request{Body: []byte("x")}, "q"); err != nil {
-			t.Fatalf("doSQS #%d: %v", i, err)
+		if _, err := c.Do(context.Background(), "sqs://q", []byte("x")); err != nil {
+			t.Fatalf("Do #%d: %v", i, err)
 		}
 	}
 	if fs.queueCalls != 1 {
@@ -73,13 +74,13 @@ func TestDoSQSCachesQueueURL(t *testing.T) {
 	}
 }
 
-func TestDoSQSQueueAsURLSkipsResolve(t *testing.T) {
+func TestSQSQueueAsURLSkipsResolve(t *testing.T) {
 	fs := &fakeSQS{sendOut: &awssqs.SendMessageOutput{MessageId: awssdk.String("m")}}
-	c := New(WithSQSAPI(fs))
+	c := awsease.New(awsease.WithSQSAPI(fs))
 
-	resp, err := c.doSQS(context.Background(), Request{Body: []byte("x")}, "https://sqs.test/direct/q")
+	resp, err := c.Do(context.Background(), "sqs://https://sqs.test/direct/q", []byte("x"))
 	if err != nil {
-		t.Fatalf("doSQS: %v", err)
+		t.Fatalf("Do: %v", err)
 	}
 	if fs.queueCalls != 0 {
 		t.Errorf("GetQueueUrl should not be called for a URL queue, got %d", fs.queueCalls)
@@ -89,12 +90,12 @@ func TestDoSQSQueueAsURLSkipsResolve(t *testing.T) {
 	}
 }
 
-func TestDoSQSNonUTF8Body(t *testing.T) {
+func TestSQSNonUTF8Body(t *testing.T) {
 	fs := &fakeSQS{sendOut: &awssqs.SendMessageOutput{MessageId: awssdk.String("m")}}
-	c := New(WithSQSAPI(fs))
+	c := awsease.New(awsease.WithSQSAPI(fs))
 
-	resp, err := c.doSQS(context.Background(), Request{Body: []byte{0xff, 0xfe, 0xfd}}, "https://sqs.test/q")
-	if !errors.Is(err, ErrBadTarget) {
+	resp, err := c.Do(context.Background(), "sqs://https://sqs.test/q", []byte{0xff, 0xfe, 0xfd})
+	if !errors.Is(err, awsease.ErrBadTarget) {
 		t.Fatalf("err = %v, want errors.Is ErrBadTarget", err)
 	}
 	if resp != nil {
@@ -105,11 +106,11 @@ func TestDoSQSNonUTF8Body(t *testing.T) {
 	}
 }
 
-func TestDoSQSTransportError(t *testing.T) {
+func TestSQSTransportError(t *testing.T) {
 	fs := &fakeSQS{sendErr: errors.New("throttled")}
-	c := New(WithSQSAPI(fs))
+	c := awsease.New(awsease.WithSQSAPI(fs))
 
-	resp, err := c.doSQS(context.Background(), Request{Body: []byte("x")}, "https://sqs.test/q")
+	resp, err := c.Do(context.Background(), "sqs://https://sqs.test/q", []byte("x"))
 	if err == nil {
 		t.Fatal("expected transport error")
 	}

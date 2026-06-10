@@ -381,12 +381,17 @@ target.go         // parseTarget、本地重定向改写、哨兵错误（ErrBad
 request.go        // Request 结构 + Method 默认推导
 response.go       // Response 结构、OK()、JSON()、String()
 do.go             // Do / DoRequest 主入口 + 内部 doHTTP/doLambda/doSQS（同包非导出，switch backend 分发）
-*_test.go         // client/target/request/response/do_http/do_lambda/do_sqs/do/fakes 单测
-integration_test.go        // 真实 AWS opt-in 集成测试（//go:build integration）
-cmd/aws-ease-mock/main.go  // 本地 HTTP mock（去掉旧信封字段，裸 echo）
+internal/mock/mock.go      // 本地 HTTP mock handler（cmd 与 tests 复用）
+cmd/aws-ease-mock/main.go  // mock 命令（薄封装 internal/mock）
+tests/            // 黑盒测试套件（package tests，只测公开 API）：response/targeting/http/lambda/sqs/client/mock_test
+                  //   + integration_test.go（真实 AWS opt-in，//go:build integration）
 examples/         // 每个 case 一个可运行 main：localdev / http / lambda / sqs
 doc/plan.md       // 本文
 ```
+
+> **测试策略：** 所有测试集中在 `tests/`（`package tests`），一律**黑盒**——只经 `Do`/`DoRequest` +
+> 注入 fake（`WithLambdaAPI`/`WithSQSAPI`）+ `httptest` 验证可观察行为，不碰任何非导出符号
+>（Go 不允许跨目录访问非导出符号，这也使包的公开面成为唯一被测契约）。
 
 > 后端执行逻辑 `doHTTP/doLambda/doSQS` 作为**同包非导出函数**内联，不再拆 `transport/*` 子包，
 > 因为它们只被 `DoRequest` 调用、且需共享 `Client` 的 httpClient / aws 客户端 / 缓存。import 图零层间接。

@@ -1,4 +1,4 @@
-package main
+package tests
 
 import (
 	"io"
@@ -6,12 +6,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/aura-studio/aws-ease/internal/mock"
 )
 
-func TestEchoBareBody(t *testing.T) {
-	t.Parallel()
-
-	srv := httptest.NewServer(newMux())
+func TestMockHandlerEcho(t *testing.T) {
+	srv := httptest.NewServer(mock.Handler())
 	defer srv.Close()
 
 	cases := []struct {
@@ -22,7 +22,6 @@ func TestEchoBareBody(t *testing.T) {
 		{"lambda route", "/lambda/order-create", "lambda"},
 		{"sqs route", "/sqs/order-events", "sqs"},
 	}
-
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			resp, err := http.Post(srv.URL+tc.path, "application/json", strings.NewReader(`{"hello":"world"}`))

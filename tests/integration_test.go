@@ -3,11 +3,11 @@
 // 真实 AWS 集成测试（默认 go test 不会编译/运行，需 -tags integration）。
 // 运行前需具备可用的 AWS 凭证与 region（环境变量或 ~/.aws）。
 //
-//	go test -tags integration -run Integration -v ./...
+//	go test -tags integration -run Integration -v ./tests/
 //
 // TestIntegrationLambdaInvoke 会真实创建并删除一个一次性 Lambda（复用账号里现有函数的
 // 执行角色，不新建 IAM），默认跳过；要跑它额外设 AWS_EASE_IT_LAMBDA_CREATE=1。
-package awsease_test
+package tests
 
 import (
 	"archive/zip"
@@ -25,7 +25,7 @@ import (
 	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 
-	"github.com/aura-studio/aws-ease"
+	awsease "github.com/aura-studio/aws-ease"
 )
 
 func itConfig(t *testing.T) awssdk.Config {
@@ -41,7 +41,7 @@ func itConfig(t *testing.T) awssdk.Config {
 	return cfg
 }
 
-// TestIntegrationHTTP：对真实公网端点发 HTTP 请求，验证 doHTTP 整链路。
+// TestIntegrationHTTP：对真实公网端点发 HTTP 请求，验证 HTTP 整链路。
 // checkip.amazonaws.com 是 AWS 的稳定服务，GET 返回 200 + 纯文本公网 IP。
 func TestIntegrationHTTP(t *testing.T) {
 	c := awsease.New()

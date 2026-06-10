@@ -1,4 +1,4 @@
-package awsease
+package tests
 
 import (
 	"bytes"
@@ -9,16 +9,18 @@ import (
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	awslambda "github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
+
+	awsease "github.com/aura-studio/aws-ease"
 )
 
-func TestDoLambdaSync(t *testing.T) {
+func TestLambdaSyncNoEnvelope(t *testing.T) {
 	payload := []byte(`{"sku":"A1","qty":2}`)
 	fl := &fakeLambda{out: &awslambda.InvokeOutput{Payload: []byte(`{"id":7}`)}}
-	c := New(WithLambdaAPI(fl))
+	c := awsease.New(awsease.WithLambdaAPI(fl))
 
-	resp, err := c.doLambda(context.Background(), Request{Body: payload}, "order-create")
+	resp, err := c.Do(context.Background(), "lambda://order-create", payload)
 	if err != nil {
-		t.Fatalf("doLambda: %v", err)
+		t.Fatalf("Do: %v", err)
 	}
 
 	// 无信封：Payload 必须逐字节等于 Body。
@@ -31,27 +33,37 @@ func TestDoLambdaSync(t *testing.T) {
 	if fl.in.InvocationType != lambdatypes.InvocationTypeRequestResponse {
 		t.Errorf("InvocationType = %q, want RequestResponse", fl.in.InvocationType)
 	}
-	if resp.Backend != BackendLambda || resp.Status != 0 || resp.FuncError != "" || !resp.OK() {
-		t.Errorf("resp = %+v; want lambda/status0/no-funcerr/ok", resp)
+	if resp.Backend != awsease.BackendLambda || resp.Status != 0 || resp.FuncError != "" || !resp.OK() {
+		t.Errorf("resp = %+v", resp)
 	}
-	if resp.String() != `{"id":7}` {
-		t.Errorf("body = %q", resp.String())
-	}
-	if resp.Requested != "order-create" {
-		t.Errorf("Requested = %q", resp.Requested)
+	if resp.String() != `{"id":7}` || resp.Requested != "order-create" {
+		t.Errorf("body=%q requested=%q", resp.String(), resp.Requested)
 	}
 }
 
-func TestDoLambdaFuncError(t *testing.T) {
+func TestLambdaArnFunctionName(t *testing.T) {
+	arn := "arn:aws:lambda:us-east-1:123:function:order-create"
+	fl := &fakeLambda{out: &awslambda.InvokeOutput{}}
+	c := awsease.New(awsease.WithLambdaAPI(fl))
+
+	if _, err := c.Do(context.Background(), "lambda://"+arn, []byte("{}")); err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if awssdk.ToString(fl.in.FunctionName) != arn {
+		t.Errorf("FunctionName = %q, want %q", awssdk.ToString(fl.in.FunctionName), arn)
+	}
+}
+
+func TestLambdaFuncError(t *testing.T) {
 	fl := &fakeLambda{out: &awslambda.InvokeOutput{
 		Payload:       []byte(`{"errorMessage":"boom"}`),
 		FunctionError: awssdk.String("Unhandled"),
 	}}
-	c := New(WithLambdaAPI(fl))
+	c := awsease.New(awsease.WithLambdaAPI(fl))
 
-	resp, err := c.doLambda(context.Background(), Request{Body: []byte("{}")}, "order-create")
+	resp, err := c.Do(context.Background(), "lambda://order-create", []byte("{}"))
 	if err != nil {
-		t.Fatalf("func error must not be a transport error, got: %v", err)
+		t.Fatalf("func error must not be a transport error: %v", err)
 	}
 	if resp.FuncError != "Unhandled" || resp.OK() || resp.Status != 0 {
 		t.Errorf("resp = %+v; want FuncError set, OK false, status 0", resp)
@@ -61,13 +73,17 @@ func TestDoLambdaFuncError(t *testing.T) {
 	}
 }
 
-func TestDoLambdaAsync(t *testing.T) {
+func TestLambdaAsync(t *testing.T) {
 	fl := &fakeLambda{out: &awslambda.InvokeOutput{}}
-	c := New(WithLambdaAPI(fl))
+	c := awsease.New(awsease.WithLambdaAPI(fl))
 
-	resp, err := c.doLambda(context.Background(), Request{Body: []byte("x"), Async: true}, "audit-logger")
+	resp, err := c.DoRequest(context.Background(), awsease.Request{
+		Target: "lambda://audit-logger",
+		Body:   []byte("x"),
+		Async:  true,
+	})
 	if err != nil {
-		t.Fatalf("doLambda: %v", err)
+		t.Fatalf("DoRequest: %v", err)
 	}
 	if fl.in.InvocationType != lambdatypes.InvocationTypeEvent {
 		t.Errorf("InvocationType = %q, want Event", fl.in.InvocationType)
@@ -77,11 +93,11 @@ func TestDoLambdaAsync(t *testing.T) {
 	}
 }
 
-func TestDoLambdaTransportError(t *testing.T) {
+func TestLambdaTransportError(t *testing.T) {
 	fl := &fakeLambda{err: errors.New("network down")}
-	c := New(WithLambdaAPI(fl))
+	c := awsease.New(awsease.WithLambdaAPI(fl))
 
-	resp, err := c.doLambda(context.Background(), Request{Body: []byte("x")}, "fn")
+	resp, err := c.Do(context.Background(), "lambda://fn", []byte("x"))
 	if err == nil {
 		t.Fatal("expected transport error")
 	}
