@@ -30,7 +30,12 @@ func TestParseErrorsViaInvoke(t *testing.T) {
 		{"empty scheme", "://x", awsease.ErrBadTarget},
 		{"http missing host", "http://", awsease.ErrBadTarget},
 		{"lambda missing name", "lambda://", awsease.ErrBadTarget},
-		{"lambda with path", "lambda://fn/extra", awsease.ErrBadTarget},
+		{"lambda path without name", "lambda:///api/x", awsease.ErrBadTarget},
+		{"lambda empty tunnel path", "lambda://fn/", awsease.ErrBadTarget},
+		{"lambda empty path segment", "lambda://fn/api//x", awsease.ErrBadTarget},
+		{"lambda trailing slash", "lambda://fn/api/x/", awsease.ErrBadTarget},
+		{"lambda unknown feature key", "lambda://fn/api/x?envelope=service", awsease.ErrBadTarget},
+		{"lambda bad async value", "lambda://fn?async=yes", awsease.ErrBadTarget},
 		{"sqs missing queue", "sqs://", awsease.ErrBadTarget},
 		{"unknown scheme", "ftp://host", awsease.ErrUnknownScheme},
 	}
@@ -47,15 +52,16 @@ func TestParseErrorsViaInvoke(t *testing.T) {
 	}
 }
 
-// TestLambdaQueryIsFeatureParams 验证 lambda://fn?x=1 现在是【合法】地址（v0.4.0 行为变化）：
-// "?" 后整段是特性参数，不再被视为非法函数名，也不会泄漏进 FunctionName。
+// TestLambdaQueryIsFeatureParams 验证 "?" 后整段是特性参数：不泄漏进 FunctionName，
+// 且（v0.5.0 行为变化）只认已知键——特性参数现在决定线上格式，未知键如 ?x=1
+// 必须显式失败（ErrBadTarget）而非静默忽略。
 func TestLambdaQueryIsFeatureParams(t *testing.T) {
 	fl := &fakeLambda{out: &awslambda.InvokeOutput{Payload: []byte("ok")}}
 	c := awsease.New(awsease.WithLambdaAPI(fl))
 
-	body, err := c.Invoke(context.Background(), "lambda://fn?x=1", []byte("p"))
+	body, err := c.Invoke(context.Background(), "lambda://fn?async=false", []byte("p"))
 	if err != nil {
-		t.Fatalf("lambda://fn?x=1 must be legal now: %v", err)
+		t.Fatalf("lambda://fn?async=false must be legal: %v", err)
 	}
 	if awssdk.ToString(fl.in.FunctionName) != "fn" {
 		t.Errorf("FunctionName = %q, want fn (feature params must not leak into the name)",
@@ -63,6 +69,10 @@ func TestLambdaQueryIsFeatureParams(t *testing.T) {
 	}
 	if string(body) != "ok" {
 		t.Errorf("body = %q, want ok", body)
+	}
+
+	if _, err := c.Invoke(context.Background(), "lambda://fn?x=1", []byte("p")); !errors.Is(err, awsease.ErrBadTarget) {
+		t.Errorf("lambda://fn?x=1 err = %v, want ErrBadTarget (unknown feature key must fail fast)", err)
 	}
 }
 

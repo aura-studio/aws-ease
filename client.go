@@ -96,8 +96,10 @@ func WithTimeout(d time.Duration) Option {
 }
 
 // WithLocalRedirect 把所有 lambda://、sqs:// 调用改写为对 base 的 HTTP mock 请求（本地切换，可选）：
-// lambda://<fn> -> {base}/lambda/<fn>，sqs://<q> -> {base}/sqs/<q>，特性参数原样转为重定向 URL
-// 的 query 供 mock 观察。返回值与校验语义和真实后端对齐（sqs/异步成功返回 nil body、sqs 仍校验 UTF-8），
+// lambda://<fn> -> {base}/lambda/<fn>，lambda://<fn>/<path> -> {base}/lambda/<fn>/<path>
+// （请求体即真实 InvokeInput.Payload：tunnel 模式下是信封字节，同步响应同样拆信封），
+// sqs://<q> -> {base}/sqs/<q>，特性参数原样转为重定向 URL 的 query 供 mock 观察。
+// 返回值与校验语义和真实后端对齐（sqs/异步成功返回 nil body、sqs 仍校验 UTF-8），
 // 本地联调验证过的行为切回真实 AWS 不变。
 func WithLocalRedirect(base string) Option {
 	return func(c *config) { c.redirectBase = base }

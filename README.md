@@ -55,6 +55,7 @@ body, err = c.Invoke(ctx, "lambda://order-create", []byte(`{"sku":"A1"}`))
 | ---- | ------ | ---- |
 | `http://host/path?x=1`、`https://host/path` | HTTP | 整串原样作请求 URL（含 query）；方法恒为 POST，无特性参数 |
 | `lambda://<fn>[?async=true]` | Lambda | `<fn>` 是函数名/ARN；payload 原样透传（**无信封**） |
+| `lambda://<fn>/<path>[?async=true]` | Lambda（tunnel） | 对端是 lambda 框架 reqresp 模式的函数：path in-band、包/拆传输信封、in-band 错误走 `err` |
 | `sqs://<queue>[?group=g&dedup=d&attr.k=v]` | SQS | `<queue>` 是队列名（惰性解析+缓存）或完整队列 URL |
 
 scheme 大小写不敏感（RFC 3986）：`HTTPS://…`、`Lambda://…` 均合法；
@@ -75,8 +76,10 @@ body, err := awsease.Invoke(ctx,
 
 ### Lambda —— `lambda://<fn>[?async=true]`
 
-`<fn>` 是函数名或 ARN，含 `/` 视为非法（`ErrBadTarget`，及早报错而非让 AWS 报隐晦错）；
-`?` 后整段都是特性参数。payload 原样作 `InvokeInput.Payload`，**无信封**——调用方传什么，Lambda 收什么。
+`<fn>` 是函数名或 ARN；`?` 后整段都是特性参数。第一个 `/` 之前是函数名，之后是
+tunnel 路径（见下节）；函数名为空、或带 `/` 但路径为空（`lambda://fn/`）视为非法
+（`ErrBadTarget`，及早报错而非让 AWS 报隐晦错）。
+不带路径时 payload 原样作 `InvokeInput.Payload`，**无信封**——调用方传什么，Lambda 收什么。
 
 | 特性参数 | 作用 |
 | -------- | ---- |
@@ -92,6 +95,36 @@ body, err := awsease.Invoke(ctx,
 ```go
 body, err := awsease.Invoke(ctx, "lambda://order-create", []byte(`{"sku":"A1","qty":2}`))
 _, err = awsease.Invoke(ctx, "lambda://audit-logger?async=true", payload) // 即发即忘
+```
+
+### Lambda tunnel —— `lambda://<fn>/<path>[?async=true]`
+
+对端不是"一个函数一个语义"的 raw 函数、而是 lambda 框架 **reqresp 模式**的函数
+（一个 Lambda 内按 in-band path 路由 N 个方法，如 scp-lambda 系列）时，路径写进 url：
+库代为包/拆 reqresp 传输信封，**信封内是裸业务数据**。
+
+请求：`payload` → `{"path":"/<path>","payload":"<base64>"}` → `InvokeInput.Payload`。
+响应：拆 `{"payload":"<base64>","error":"..."}`——**`error` 非空走 `err`**（in-band
+错误不再静默，框架 404 与 service 层错误都从这里浮出），成功返回解码后的 payload
+字节；响应不是信封 JSON（对端不是 reqresp 函数）报 `ErrBadResponse`。
+
+service 应用信封（`{"meta":{...},"data":"<base64>"}`）是对端引擎与 tunnel 之间的
+**内部契约**：引擎收到请求后自行包、返回前自行拆，service 层错误（`Meta["Error"]`）
+也由引擎翻译进 `Response.error`——客户端不感知、也绝不能代包（会双重包裹）。
+
+路径与特性参数校验从严（及早报错）：路径空段（`fn//x`、`fn/x/`）非法；特性参数
+只认 `async=true|1|false|0`，未知键/值一律 `ErrBadTarget`——特性参数决定线上格式，
+拼写错误必须显式失败而非静默改变语义。
+
+| 特性参数 | 作用 |
+| -------- | ---- |
+| `async=true`（或 `1`） | 即发即忘（请求仍包信封；in-band 错误天然不可见） |
+
+```go
+// reqresp tunnel：path in-band，in-band 错误可见；payload 即方法的请求 JSON
+body, err := awsease.Invoke(ctx,
+    "lambda://scp-lambda-tango/api/tango/v1/upload",
+    []byte(`{"line":"..."}`))
 ```
 
 ### SQS —— `sqs://<queue>[?group=g&dedup=d&attr.k=v]`

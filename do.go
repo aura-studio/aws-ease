@@ -2,6 +2,7 @@ package awsease
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -47,6 +48,61 @@ func (c *Client) Invoke(ctx context.Context, target string, payload []byte) ([]b
 	}
 }
 
+// reqrespRequest / reqrespResponse 复刻 lambda 框架 reqresp 模式的传输信封
+// （github.com/aura-studio/lambda/reqresp 的 proto JSON 形状：bytes 字段经
+// encoding/json 即 base64 字符串）。tunnel 模式下 doLambda 用它携带 in-band 路径，
+// 并把 in-band 错误（Response.error）翻译成 err —— 不引框架依赖，只对齐线上字节。
+//
+// 注意：信封内的 payload 是【裸业务数据】。service 应用信封（{"meta","data"}）
+// 是 reqresp 引擎与 tunnel 之间的内部契约——引擎收到请求后自行包、返回前自行拆，
+// service 层错误（Meta["Error"]）也由引擎翻译进 Response.error——客户端不感知、
+// 也绝不能代包（会双重包裹，业务方法收到的将是信封而非数据）。
+type reqrespRequest struct {
+	Path    string `json:"path,omitempty"`
+	Payload []byte `json:"payload,omitempty"`
+}
+
+type reqrespResponse struct {
+	Payload []byte `json:"payload,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// splitLambdaTarget 把 lambda 地址余段切成 (函数名, tunnel 路径)。
+// 无 "/" 时路径为空串（raw 透传模式）；有 "/" 时路径恢复前导 "/"
+// （reqresp 路由以 "/" 开头）。合法性已由 parseTarget 保证。
+func splitLambdaTarget(addr string) (string, string) {
+	fn, rest, ok := strings.Cut(addr, "/")
+	if !ok {
+		return fn, ""
+	}
+	return fn, "/" + rest
+}
+
+// wrapTunnelRequest 把裸业务 payload 包进 reqresp 传输信封。
+func wrapTunnelRequest(path string, payload []byte) ([]byte, error) {
+	b, err := json.Marshal(reqrespRequest{Path: path, Payload: payload})
+	if err != nil {
+		return nil, fmt.Errorf("awsease: marshal tunnel request: %w", err)
+	}
+	return b, nil
+}
+
+// unwrapTunnelResponse 拆 reqresp 传输信封并把 in-band 错误翻译成 err
+// （Response.error 同时承载框架错误如 404 与业务/service 层错误），
+// 成功返回信封内的业务数据。响应不是信封 JSON 时报 ErrBadResponse
+// ——对端多半不是 reqresp 模式的函数。
+func unwrapTunnelResponse(function, path string, body []byte) ([]byte, error) {
+	var rr reqrespResponse
+	if err := json.Unmarshal(body, &rr); err != nil {
+		return nil, fmt.Errorf("awsease: lambda %q path %q: decode tunnel response: %v: %.200s: %w",
+			function, path, err, body, ErrBadResponse)
+	}
+	if rr.Error != "" {
+		return nil, fmt.Errorf("awsease: lambda %q path %q: tunnel error: %s", function, path, rr.Error)
+	}
+	return rr.Payload, nil
+}
+
 // doRedirect 在设置了 WithLocalRedirect 时，把 lambda://、sqs:// 打到本地 base：
 //
 //	lambda://<fn>?async=true  -> {base}/lambda/<fn>?async=true
@@ -54,10 +110,22 @@ func (c *Client) Invoke(ctx context.Context, target string, payload []byte) ([]b
 //
 // 特性参数原样转成重定向 URL 的 query 供 mock 端观察，但【不】作为 HTTP 特性参数解读
 // （sqs 的 ?method=… 不会改写实际 HTTP 方法）。返回值与校验同生产对齐：sqs 仍做 UTF-8
-// 校验、sqs 与 lambda 异步成功返回 (nil, nil)，保证本地联调跑出的行为切到真实后端不变。
+// 校验、sqs 与 lambda 异步成功返回 (nil, nil)，lambda tunnel 模式下 mock 收到的请求体
+// 即真实 InvokeInput.Payload（信封字节）、同步响应同样拆信封，保证本地联调跑出的行为
+// 切到真实后端不变。
 func (c *Client) doRedirect(ctx context.Context, b backend, addr string, feat url.Values, payload []byte) ([]byte, error) {
 	if b == backendSQS && !utf8.Valid(payload) {
 		return nil, fmt.Errorf("awsease: sqs message body is not valid UTF-8: %w", ErrBadTarget)
+	}
+	var tunnelFn, tunnelPath string
+	if b == backendLambda {
+		tunnelFn, tunnelPath = splitLambdaTarget(addr)
+		if tunnelPath != "" {
+			var err error
+			if payload, err = wrapTunnelRequest(tunnelPath, payload); err != nil {
+				return nil, err
+			}
+		}
 	}
 	u := strings.TrimRight(c.redirectBase, "/") + "/" + string(b) + "/" + addr
 	if len(feat) > 0 {
@@ -69,6 +137,9 @@ func (c *Client) doRedirect(ctx context.Context, b backend, addr string, feat ur
 	}
 	if b == backendSQS || isAsync(feat) {
 		return nil, nil // 推送 / 即发即忘语义：与生产一致，不返回 mock 的响应体
+	}
+	if tunnelPath != "" {
+		return unwrapTunnelResponse(tunnelFn, tunnelPath, body)
 	}
 	return body, nil
 }
@@ -101,10 +172,27 @@ func (c *Client) doHTTP(ctx context.Context, addr string, payload []byte) ([]byt
 	return respBody, nil
 }
 
-// doLambda 执行 Lambda 后端：payload 原样透传（无信封）。
-// 特性参数：async=true|1 走 InvocationType=Event 即发即忘（成功返回 nil body）。
+// doLambda 执行 Lambda 后端。地址余段按第一个 "/" 切成 (函数名, tunnel 路径)：
+//
+//	lambda://<fn>            raw 模式：payload 原样透传（无信封），返回值也原样透传。
+//	lambda://<fn>/<path>     tunnel 模式：裸业务 payload 包进 reqresp 传输信封
+//	                         {"path":"/<path>","payload":"<base64>"}，对端是
+//	                         lambda 框架 reqresp 模式的函数；响应拆信封，
+//	                         in-band 错误（Response.error，含框架 404 与
+//	                         service 层错误）翻译成 err。
+//
+// 特性参数：async=true|1 走 InvocationType=Event 即发即忘（成功返回 nil body，
+// tunnel 模式下 in-band 错误天然不可见）。
 // 函数内部错误（FunctionError 非空）视为失败，错误名与错误 payload 放进 err。
-func (c *Client) doLambda(ctx context.Context, function string, feat url.Values, payload []byte) ([]byte, error) {
+func (c *Client) doLambda(ctx context.Context, addr string, feat url.Values, payload []byte) ([]byte, error) {
+	function, path := splitLambdaTarget(addr)
+	if path != "" {
+		var err error
+		if payload, err = wrapTunnelRequest(path, payload); err != nil {
+			return nil, err
+		}
+	}
+
 	invoker, err := c.lambdaClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("awsease: lambda client: %w", err)
@@ -119,7 +207,7 @@ func (c *Client) doLambda(ctx context.Context, function string, feat url.Values,
 	out, err := invoker.Invoke(ctx, &awslambda.InvokeInput{
 		FunctionName:   awssdk.String(function),
 		InvocationType: invType,
-		Payload:        payload, // 原样透传，无 {path,query,payload} 信封
+		Payload:        payload, // raw 模式无信封；tunnel 模式已是信封字节
 	})
 	if err != nil {
 		return nil, fmt.Errorf("awsease: invoke lambda %q: %w", function, err)
@@ -130,6 +218,9 @@ func (c *Client) doLambda(ctx context.Context, function string, feat url.Values,
 	}
 	if funcErr := awssdk.ToString(out.FunctionError); funcErr != "" {
 		return nil, fmt.Errorf("awsease: lambda %q failed: %s: %s", function, funcErr, out.Payload)
+	}
+	if path != "" {
+		return unwrapTunnelResponse(function, path, out.Payload)
 	}
 	return out.Payload, nil
 }
