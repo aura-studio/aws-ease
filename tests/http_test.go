@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"testing"
 
@@ -16,20 +15,19 @@ import (
 )
 
 // echoView 是 echo 服务器写进响应体的观察结果。新 API 只返回响应体字节、
-// 响应头对调用方完全不可见，所以服务器观察到的 method / 请求头 / RawQuery
+// 响应头对调用方完全不可见，所以服务器观察到的 method / Path / RawQuery / body
 // 都必须经由响应体带回来再断言。
 type echoView struct {
 	Method string `json:"method"`
-	Custom string `json:"custom"` // 服务器看到的 X-Custom 请求头
-	Path   string `json:"path"`   // 服务器看到的 Path（用于断言 path 不被误改写）
-	Query  string `json:"query"`  // 服务器看到的 RawQuery（用于断言 ease.* 已被剥除、真实 query 保留）
-	Body   string `json:"body"`   // 服务器收到的请求体
+	Path   string `json:"path"`  // 服务器看到的 Path（用于断言 path 不被误改写）
+	Query  string `json:"query"` // 服务器看到的 RawQuery（用于断言真实 query 原样透传）
+	Body   string `json:"body"`  // 服务器收到的请求体
 }
 
 // newEchoServer 起一个观察服务器：
 //   - /raw      把请求体逐字节原样写回（验证 2xx 返回体字节不被库改写）；
 //   - /notfound 返回 404 + 固定提示体（验证非 2xx 的错误语义）；
-//   - 其余路径  把观察到的 method / X-Custom / RawQuery / body 编成 JSON 写进响应体。
+//   - 其余路径  把观察到的 method / Path / RawQuery / body 编成 JSON 写进响应体。
 func newEchoServer() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -44,7 +42,6 @@ func newEchoServer() *httptest.Server {
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(echoView{
 				Method: r.Method,
-				Custom: r.Header.Get("X-Custom"),
 				Path:   r.URL.Path,
 				Query:  r.URL.RawQuery,
 				Body:   string(body),
@@ -67,18 +64,18 @@ func invokeEcho(t *testing.T, c *awsease.Client, url string, payload []byte) ech
 	return v
 }
 
-// TestHTTPMethodDefaults 验证默认方法推导：无 payload -> GET，有 payload -> POST 且体被透传。
-func TestHTTPMethodDefaults(t *testing.T) {
+// TestHTTPAlwaysPost 验证 HTTP 后端方法恒为 POST（无论有无 payload），payload 原样透传。
+func TestHTTPAlwaysPost(t *testing.T) {
 	srv := newEchoServer()
 	defer srv.Close()
 	c := awsease.New()
 
-	// 无 payload -> 默认 GET。
-	if v := invokeEcho(t, c, srv.URL+"/", nil); v.Method != http.MethodGet {
-		t.Errorf("no-payload method = %q, want GET", v.Method)
+	// 无 payload 也是 POST。
+	if v := invokeEcho(t, c, srv.URL+"/", nil); v.Method != http.MethodPost {
+		t.Errorf("no-payload method = %q, want POST", v.Method)
 	}
 
-	// 有 payload -> 默认 POST，且 payload 被服务器原样收到。
+	// 有 payload：POST，且 payload 被服务器原样收到。
 	v := invokeEcho(t, c, srv.URL+"/", []byte("hello"))
 	if v.Method != http.MethodPost {
 		t.Errorf("payload method = %q, want POST", v.Method)
@@ -88,37 +85,18 @@ func TestHTTPMethodDefaults(t *testing.T) {
 	}
 }
 
-// TestHTTPFeatureParams 验证保留字参数：ease.method / ease.header.* 生效后从发出的 URL
-// 中剥除，真实业务 query 原样保留（全部用服务器看到的 RawQuery 断言）。
-func TestHTTPFeatureParams(t *testing.T) {
-	srv := newEchoServer()
-	defer srv.Close()
-	c := awsease.New()
-
-	v := invokeEcho(t, c, srv.URL+"/x?a=1&b=2&ease.method=DELETE&ease.header.X-Custom=v", []byte("payload"))
-	if v.Method != http.MethodDelete {
-		t.Errorf("method = %q, want DELETE", v.Method)
-	}
-	if v.Custom != "v" {
-		t.Errorf("server saw X-Custom = %q, want v", v.Custom)
-	}
-	if strings.Contains(v.Query, "ease.") {
-		t.Errorf("reserved params leaked to the wire: %q", v.Query)
-	}
-	if v.Query != "a=1&b=2" {
-		t.Errorf("real query lost or rewritten: %q, want a=1&b=2", v.Query)
-	}
-}
-
-// TestHTTPRawURLNotReencoded 验证不含 "ease." 的 URL 原样发出：
-// 预编码的 query 字符（%20、%2F）绝不被重新编码改写。
-func TestHTTPRawURLNotReencoded(t *testing.T) {
+// TestHTTPRawURLVerbatim 验证 URL 原样发出：path 与预编码的 query 字符（%20、%2F）
+// 绝不被重新编码或改写，真实 query 原样到达服务器。
+func TestHTTPRawURLVerbatim(t *testing.T) {
 	srv := newEchoServer()
 	defer srv.Close()
 	c := awsease.New()
 
 	const rawQuery = "pre%20encoded=a%2Fb&plain=1"
 	v := invokeEcho(t, c, srv.URL+"/x?"+rawQuery, nil)
+	if v.Path != "/x" {
+		t.Errorf("path = %q, want /x", v.Path)
+	}
 	if v.Query != rawQuery {
 		t.Errorf("query was re-encoded: %q, want %q", v.Query, rawQuery)
 	}
@@ -158,36 +136,6 @@ func TestHTTPBodyBytesVerbatim(t *testing.T) {
 	}
 	if !bytes.Equal(body, payload) {
 		t.Errorf("body = %v, want %v (bytes must round-trip verbatim)", body, payload)
-	}
-}
-
-// TestHTTPHeaderMultiValue 验证 ease.header.<Name> 多值：同名键的重复与顺序都要保留
-// （Header.Add 追加而非覆盖），不同键互不串扰。响应头对调用方完全不可见，所以服务器
-// 必须把 r.Header.Values 写进响应体带回来再断言。
-func TestHTTPHeaderMultiValue(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string][]string{
-			"multi": r.Header.Values("X-Multi"),
-			"other": r.Header.Values("X-Other"),
-		})
-	}))
-	defer srv.Close()
-	c := awsease.New()
-
-	body, err := c.Invoke(context.Background(),
-		srv.URL+"/x?ease.header.X-Multi=a&ease.header.X-Multi=b&ease.header.X-Other=c", nil)
-	if err != nil {
-		t.Fatalf("Invoke: %v", err)
-	}
-	var got map[string][]string
-	if err := json.Unmarshal(body, &got); err != nil {
-		t.Fatalf("decode echo body %q: %v", body, err)
-	}
-	if want := []string{"a", "b"}; !slices.Equal(got["multi"], want) {
-		t.Errorf("X-Multi = %v, want %v (duplicates and order must survive)", got["multi"], want)
-	}
-	if want := []string{"c"}; !slices.Equal(got["other"], want) {
-		t.Errorf("X-Other = %v, want %v", got["other"], want)
 	}
 }
 
@@ -254,42 +202,6 @@ func TestHTTPStatusClassification(t *testing.T) {
 	}
 }
 
-// TestHTTPEaseStripKeepsRestVerbatim 验证含保留字参数时其余 query 段【字节原样】透传：
-// 顺序、预编码值（%2F）、裸键（flag）、分号段（c=1;d=2）都不被重排或重编码，仅剥除
-// ease.* 段——预签名 URL 等对字节敏感的场景不能被破坏。
-func TestHTTPEaseStripKeepsRestVerbatim(t *testing.T) {
-	srv := newEchoServer()
-	defer srv.Close()
-	c := awsease.New()
-
-	const kept = "b=2&a=a%2Fb&flag&c=1;d=2"
-	v := invokeEcho(t, c, srv.URL+"/x?"+kept+"&ease.method=DELETE", nil)
-	if v.Method != http.MethodDelete {
-		t.Errorf("method = %q, want DELETE", v.Method)
-	}
-	if v.Query != kept {
-		t.Errorf("query rewritten: %q, want %q (non-ease segments must survive byte-for-byte)", v.Query, kept)
-	}
-}
-
-// TestHTTPEaseInPathOnlyVerbatim 验证 "ease." 仅作为 path 子串出现（release.notes 含
-// "ease."）、query 无保留字键时，URL 整串字节原样发出：不能因为子串误判走解析改写路径，
-// 否则预编码的 query（%20、%2F）会被重编码破坏。
-func TestHTTPEaseInPathOnlyVerbatim(t *testing.T) {
-	srv := newEchoServer()
-	defer srv.Close()
-	c := awsease.New()
-
-	const rawQuery = "pre%20encoded=a%2Fb"
-	v := invokeEcho(t, c, srv.URL+"/release.notes?"+rawQuery, nil)
-	if v.Path != "/release.notes" {
-		t.Errorf("path = %q, want /release.notes", v.Path)
-	}
-	if v.Query != rawQuery {
-		t.Errorf("query was re-encoded: %q, want %q", v.Query, rawQuery)
-	}
-}
-
 // TestHTTPSchemeCaseInsensitive 验证 scheme 大小写不敏感（RFC 3986）：大写 scheme 照常
 // 路由到 HTTP 后端，发出前被改写为小写。httptest 是明文 http，故用 HTTP:// 大写形式验证。
 func TestHTTPSchemeCaseInsensitive(t *testing.T) {
@@ -299,8 +211,8 @@ func TestHTTPSchemeCaseInsensitive(t *testing.T) {
 
 	upper := "HTTP://" + strings.TrimPrefix(srv.URL, "http://")
 	v := invokeEcho(t, c, upper+"/x?plain=1", nil)
-	if v.Method != http.MethodGet {
-		t.Errorf("method = %q, want GET", v.Method)
+	if v.Method != http.MethodPost {
+		t.Errorf("method = %q, want POST", v.Method)
 	}
 	if v.Query != "plain=1" {
 		t.Errorf("query = %q, want plain=1", v.Query)

@@ -83,8 +83,7 @@ func TestRedirectSQSFeaturesBecomeQuery(t *testing.T) {
 }
 
 // TestRedirectSQSMethodParamNotHTTPMethod 验证重定向时特性参数【不】作为 HTTP 特性参数解读：
-// sqs 的 ?method=DELETE 只进重定向 URL 的 query 供 mock 观察，实际 HTTP 方法仍按
-// 「payload 非空 -> POST / 空 -> GET」推导。
+// sqs 的 ?method=DELETE 只进重定向 URL 的 query 供 mock 观察，实际 HTTP 方法恒为 POST。
 func TestRedirectSQSMethodParamNotHTTPMethod(t *testing.T) {
 	srv, hits := newRedirectServer()
 	defer srv.Close()

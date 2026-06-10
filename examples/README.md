@@ -13,7 +13,7 @@ err 非 nil 即失败（body 恒为 nil），成功时 body 即响应/返回 pay
 | 目录 | 演示 | 是否需要 AWS |
 |------|------|--------------|
 | [`localdev`](localdev) | `WithLocalRedirect` 把 `lambda://`、`sqs://` 打到进程内 HTTP mock，端到端跑通 + `errors.Is` 哨兵判错 | 否（开箱即跑） |
-| [`http`](http) | 包级 `awsease.Invoke(ctx, "http://"+target, payload)` —— 默认 POST、query 原样保留 | 否（需一个可 POST 的端点） |
+| [`http`](http) | 包级 `awsease.Invoke(ctx, "http://"+target, payload)` —— 方法恒为 POST、query 原样保留 | 否（需一个可 POST 的端点） |
 | [`lambda`](lambda) | `c.Invoke(ctx, "lambda://"+target, payload)` | 是 |
 | [`sqs`](sqs) | `c.Invoke(ctx, "sqs://"+target, payload)` | 是 |
 
@@ -29,6 +29,6 @@ AWS_REGION=us-east-1 AWS_EASE_LAMBDA_TARGET=my-func   go run ./examples/lambda
 AWS_REGION=us-east-1 AWS_EASE_SQS_TARGET=my-queue     go run ./examples/sqs
 ```
 
-> 异步 Lambda、FIFO SQS、自定义 HTTP method/header 等细控全部走 URL 参数，调用模式不变：
-> `lambda://fn?async=true`、`sqs://q?group=g&dedup=d&attr.k=v`、`http://…?ease.method=DELETE&ease.header.X-Custom=v`。
+> 异步 Lambda、FIFO SQS 等细控走 URL 参数，调用模式不变：
+> `lambda://fn?async=true`、`sqs://q?group=g&dedup=d&attr.k=v`（HTTP 后端恒为 POST，无特性参数）。
 > 完整 API 与 URL 约定见 [../README.md](../README.md)。

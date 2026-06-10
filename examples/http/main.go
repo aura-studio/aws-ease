@@ -1,9 +1,7 @@
 // Command http 演示用 aws-ease 调普通 HTTP 后端。
 //
 // 统一调用模式：awsease.Invoke(ctx, url, payload) -> (body, err)。
-// payload 非空 -> 默认 POST；path/query 直接写在 URL 里；
-// 需要自定义方法/请求头时用保留字参数 ?ease.method=DELETE&ease.header.X-Custom=v
-// （以 "ease." 开头的参数发出前会被剥除，其余 query 原样保留）。
+// 方法恒为 POST；path/query 直接写在 URL 里，原样透传。
 //
 // 运行（需一个可 POST 的端点，如 httpbin.org/post）：
 //

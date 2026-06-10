@@ -21,7 +21,7 @@ go get github.com/aura-studio/aws-ease
 「调的是 HTTP 还是 Lambda 还是 SQS」又常硬编码进业务逻辑，切环境就得改代码。
 
 aws-ease 把「调什么」和「怎么调」用一个地址串统一起来：scheme 即后端，
-特性参数（HTTP method/header、Lambda 异步、SQS FIFO/属性）全部以 query 参数写在地址里，一眼可读、可整体进配置。
+特性参数（Lambda 异步、SQS FIFO/属性）全部以 query 参数写在地址里，一眼可读、可整体进配置（HTTP 后端无特性参数）。
 
 ```
 调用方 ──► Invoke(ctx, "backend://target?特性参数", payload) ──► scheme 决定后端
@@ -40,7 +40,7 @@ aws-ease 把「调什么」和「怎么调」用一个地址串统一起来：sc
 ctx := context.Background()
 
 // 80% 场景：包级 Invoke（默认超时、默认 AWS 凭证链；惰性初始化、并发安全）
-body, err := awsease.Invoke(ctx, "https://api.internal/v1/users/42", nil) // 无 payload -> GET
+body, err := awsease.Invoke(ctx, "https://api.internal/v1/users/42", nil) // HTTP 恒为 POST
 body, err = awsease.Invoke(ctx, "lambda://order-create", []byte(`{"sku":"A1"}`))
 _, err = awsease.Invoke(ctx, "sqs://order-events", []byte(`{"event":"created"}`)) // 推送成功 body 为 nil
 
@@ -53,7 +53,7 @@ body, err = c.Invoke(ctx, "lambda://order-create", []byte(`{"sku":"A1"}`))
 
 | 地址 | 路由到 | 说明 |
 | ---- | ------ | ---- |
-| `http://host/path?x=1`、`https://host/path` | HTTP | 整串原样作请求 URL；`ease.` 开头的保留字参数发出前剥除 |
+| `http://host/path?x=1`、`https://host/path` | HTTP | 整串原样作请求 URL（含 query）；方法恒为 POST，无特性参数 |
 | `lambda://<fn>[?async=true]` | Lambda | `<fn>` 是函数名/ARN；payload 原样透传（**无信封**） |
 | `sqs://<queue>[?group=g&dedup=d&attr.k=v]` | SQS | `<queue>` 是队列名（惰性解析+缓存）或完整队列 URL |
 
@@ -62,21 +62,15 @@ HTTP URL 的 scheme 发出前会统一改写为小写（`http.Transport` 只认�
 
 ### HTTP —— `http(s)://…`
 
-整串就是请求 URL，path/query 都写在里面。**保留字参数以 `ease.` 开头、发出前剥除**。
-含 `ease.` 参数的 URL 按 `&` 逐段处理：仅剥除 `ease.` 段，其余 query 段**字节原样**保留——
-不重排、不重编码（`;` 分隔、预编码值、裸键全部原样透传），预签名 URL 等对字节敏感的地址可以放心用；
-不含 `ease.` 的 URL 整串原样发出。`ease.` 段本身解析失败返回 `ErrBadTarget`（错误串含底层原因）。
-
-| 特性参数 | 作用 |
-| -------- | ---- |
-| `ease.method=DELETE` | 指定 HTTP 方法。默认：无 payload -> GET，有 payload -> POST |
-| `ease.header.<Name>=v` | 设置请求头，可多个（如 `ease.header.X-Trace-Id=abc`） |
+整串就是请求 URL，path/query 都写在里面，**字节原样发出**——不重排、不重编码
+（`;` 分隔、预编码值、裸键全部原样透传），预签名 URL 等对字节敏感的地址可以放心用。
+**方法恒为 POST，无特性参数**（不再有 `ease.` 保留字，不支持自定义方法或请求头）。
 
 返回与错误：2xx 返回响应体字节；**非 2xx 一律返回 `err`**（错误串含 `status <码>` 与响应体，方便直接打日志），`body` 恒为 nil。
 
 ```go
 body, err := awsease.Invoke(ctx,
-    "https://api.internal/v1/users/42?pretty=1&ease.header.X-Trace-Id=abc", nil)
+    "https://api.internal/v1/users/42?pretty=1", []byte(`{"name":"new"}`))
 ```
 
 ### Lambda —— `lambda://<fn>[?async=true]`

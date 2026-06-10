@@ -37,7 +37,7 @@ func (c *Client) Invoke(ctx context.Context, target string, payload []byte) ([]b
 
 	switch b {
 	case backendHTTP:
-		return c.doHTTP(ctx, addr, feat, payload)
+		return c.doHTTP(ctx, addr, payload)
 	case backendLambda:
 		return c.doLambda(ctx, addr, feat, payload)
 	case backendSQS:
@@ -63,7 +63,7 @@ func (c *Client) doRedirect(ctx context.Context, b backend, addr string, feat ur
 	if len(feat) > 0 {
 		u += "?" + feat.Encode()
 	}
-	body, err := c.doHTTP(ctx, u, nil, payload)
+	body, err := c.doHTTP(ctx, u, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -73,37 +73,21 @@ func (c *Client) doRedirect(ctx context.Context, b backend, addr string, feat ur
 	return body, nil
 }
 
-// doHTTP 执行 HTTP 后端：addr 即完整请求地址（保留字参数已剥除），payload 作请求体。
-// 特性参数：method（默认无 payload -> GET，否则 POST）、header.<Name>。
-// 非 2xx 一律视为失败，状态码与响应体放进 err。
-func (c *Client) doHTTP(ctx context.Context, addr string, feat url.Values, payload []byte) ([]byte, error) {
+// doHTTP 执行 HTTP 后端：addr 即完整请求地址（含 query，原样透传），payload 作请求体，
+// 方法恒为 POST。非 2xx 一律视为失败，状态码与响应体放进 err。
+func (c *Client) doHTTP(ctx context.Context, addr string, payload []byte) ([]byte, error) {
 	var body io.Reader
 	if len(payload) > 0 {
 		body = strings.NewReader(string(payload))
 	}
-	method := feat.Get("method")
-	if method == "" {
-		if len(payload) == 0 {
-			method = http.MethodGet
-		} else {
-			method = http.MethodPost
-		}
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, method, addr, body)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, addr, body)
 	if err != nil {
 		return nil, fmt.Errorf("awsease: build http request: %w", err)
-	}
-	for k, vs := range feat {
-		if name, ok := strings.CutPrefix(k, "header."); ok {
-			for _, v := range vs {
-				httpReq.Header.Add(name, v)
-			}
-		}
 	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("awsease: http %s %s: %w", method, addr, err)
+		return nil, fmt.Errorf("awsease: http POST %s: %w", addr, err)
 	}
 	defer resp.Body.Close()
 
@@ -112,7 +96,7 @@ func (c *Client) doHTTP(ctx context.Context, addr string, feat url.Values, paylo
 		return nil, fmt.Errorf("awsease: read http response from %s: %w", addr, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("awsease: http %s %s: status %d: %s", method, addr, resp.StatusCode, respBody)
+		return nil, fmt.Errorf("awsease: http POST %s: status %d: %s", addr, resp.StatusCode, respBody)
 	}
 	return respBody, nil
 }
