@@ -140,6 +140,21 @@ func (c *Client) awsConfigLocked(ctx context.Context) (awssdk.Config, error) {
 	return cfg, nil
 }
 
+// withEndpoint 在设置了 WithAWSEndpoint 时，把自建端点装到 cfg 副本上。
+// 用 config 级的 EndpointResolverWithOptions（而非 service Options 的 BaseEndpoint），
+// 以兼容下游项目仍在用的 2023 版 aws-sdk-go-v2（v1.18.x，无 BaseEndpoint）。
+func (c *Client) withEndpoint(cfg awssdk.Config) awssdk.Config {
+	if c.awsEndpoint == "" {
+		return cfg
+	}
+	endpoint := c.awsEndpoint
+	cfg.EndpointResolverWithOptions = awssdk.EndpointResolverWithOptionsFunc(
+		func(service, region string, options ...interface{}) (awssdk.Endpoint, error) {
+			return awssdk.Endpoint{URL: endpoint, HostnameImmutable: true}, nil
+		})
+	return cfg
+}
+
 // lambdaClient 惰性返回 Lambda 客户端（注入优先，否则按 aws.Config 构建，应用 WithAWSEndpoint）。
 // 构建成功才缓存；并发调用在初始化期间串行（它们本来也都得等同一份 cfg）。
 func (c *Client) lambdaClient(ctx context.Context) (LambdaAPI, error) {
@@ -152,11 +167,7 @@ func (c *Client) lambdaClient(ctx context.Context) (LambdaAPI, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.lambdaAPI = awslambda.NewFromConfig(cfg, func(o *awslambda.Options) {
-		if c.awsEndpoint != "" {
-			o.BaseEndpoint = awssdk.String(c.awsEndpoint)
-		}
-	})
+	c.lambdaAPI = awslambda.NewFromConfig(c.withEndpoint(cfg))
 	return c.lambdaAPI, nil
 }
 
@@ -172,10 +183,6 @@ func (c *Client) sqsClient(ctx context.Context) (SQSAPI, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.sqsAPI = awssqs.NewFromConfig(cfg, func(o *awssqs.Options) {
-		if c.awsEndpoint != "" {
-			o.BaseEndpoint = awssdk.String(c.awsEndpoint)
-		}
-	})
+	c.sqsAPI = awssqs.NewFromConfig(c.withEndpoint(cfg))
 	return c.sqsAPI, nil
 }

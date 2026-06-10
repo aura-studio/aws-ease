@@ -168,7 +168,7 @@ func TestIntegrationLambdaInvoke(t *testing.T) {
 
 	if _, err := lc.CreateFunction(ctx, &lambda.CreateFunctionInput{
 		FunctionName: awssdk.String(fnName),
-		Runtime:      lambdatypes.RuntimePython313,
+		Runtime:      lambdatypes.Runtime("python3.13"), // 字符串字面量：老版 SDK 无 RuntimePython313 常量，API 侧照常接受
 		Role:         awssdk.String(role),
 		Handler:      awssdk.String("index.handler"),
 		Code:         &lambdatypes.FunctionCode{ZipFile: echoZip(t)},
