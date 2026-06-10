@@ -383,7 +383,6 @@ awsease.go        // package doc + Version + Backend 常量
 client.go         // Client、New、config、Option*、惰性 AWS 客户端构建、SQS QueueUrl 缓存(+RWMutex)
 target.go         // parseTarget、本地重定向改写、哨兵错误（ErrBadTarget / ErrUnknownScheme）
 request.go        // Request 结构 + Method 默认推导
-response.go       // Response 结构、OK()、JSON()、String()
 do.go             // Do / DoRequest 主入口 + 内部 doHTTP/doLambda/doSQS（同包非导出，switch backend 分发）
 internal/mock/mock.go      // 本地 HTTP mock handler（cmd 与 tests 复用）
 cmd/aws-ease-mock/main.go  // mock 命令（薄封装 internal/mock）
